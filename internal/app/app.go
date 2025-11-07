@@ -6,12 +6,14 @@ import (
 	"github.com/rebeliceyang/lazypg/internal/config"
 	"github.com/rebeliceyang/lazypg/internal/models"
 	"github.com/rebeliceyang/lazypg/internal/ui/components"
+	"github.com/rebeliceyang/lazypg/internal/ui/theme"
 )
 
 // App is the main application model
 type App struct {
 	state      models.AppState
 	config     *config.Config
+	theme      theme.Theme
 	leftPanel  components.Panel
 	rightPanel components.Panel
 }
@@ -19,6 +21,13 @@ type App struct {
 // New creates a new App instance with config
 func New(cfg *config.Config) *App {
 	state := models.NewAppState()
+
+	// Load theme
+	themeName := "default"
+	if cfg != nil && cfg.UI.Theme != "" {
+		themeName = cfg.UI.Theme
+	}
+	th := theme.GetTheme(themeName)
 
 	// Apply config to state
 	if cfg != nil && cfg.UI.PanelWidthRatio > 0 && cfg.UI.PanelWidthRatio < 100 {
@@ -28,15 +37,16 @@ func New(cfg *config.Config) *App {
 	app := &App{
 		state:  state,
 		config: cfg,
+		theme:  th,
 		leftPanel: components.Panel{
 			Title:   "Navigation",
 			Content: "Databases\n└─ (empty)",
-			Style:   lipgloss.NewStyle().BorderForeground(lipgloss.Color("62")),
+			Style:   lipgloss.NewStyle().BorderForeground(th.BorderFocused),
 		},
 		rightPanel: components.Panel{
 			Title:   "Content",
 			Content: "Select a database object to view",
-			Style:   lipgloss.NewStyle().BorderForeground(lipgloss.Color("240")),
+			Style:   lipgloss.NewStyle().BorderForeground(th.Border),
 		},
 	}
 
@@ -83,10 +93,10 @@ func (a *App) View() string {
 	topBarRight := "⌘K"
 	topBarContent := a.formatStatusBar(topBarLeft, topBarRight)
 
-	// Top bar
+	// Top bar with theme colors
 	topBar := lipgloss.NewStyle().
 		Width(a.state.Width).
-		Background(lipgloss.Color("62")).
+		Background(a.theme.BorderFocused).
 		Foreground(lipgloss.Color("230")).
 		Padding(0, 2).
 		Render(topBarContent)
@@ -96,11 +106,11 @@ func (a *App) View() string {
 	bottomBarRight := "⌘K Command"
 	bottomBarContent := a.formatStatusBar(bottomBarLeft, bottomBarRight)
 
-	// Bottom bar
+	// Bottom bar with theme colors
 	bottomBar := lipgloss.NewStyle().
 		Width(a.state.Width).
-		Background(lipgloss.Color("236")).
-		Foreground(lipgloss.Color("250")).
+		Background(a.theme.Selection).
+		Foreground(a.theme.Foreground).
 		Padding(0, 2).
 		Render(bottomBarContent)
 
@@ -158,15 +168,12 @@ func (a *App) updatePanelDimensions() {
 
 // updatePanelStyles updates panel styling based on focus
 func (a *App) updatePanelStyles() {
-	focusedColor := lipgloss.Color("62")
-	unfocusedColor := lipgloss.Color("240")
-
 	if a.state.FocusedPanel == models.LeftPanel {
-		a.leftPanel.Style = lipgloss.NewStyle().BorderForeground(focusedColor)
-		a.rightPanel.Style = lipgloss.NewStyle().BorderForeground(unfocusedColor)
+		a.leftPanel.Style = lipgloss.NewStyle().BorderForeground(a.theme.BorderFocused)
+		a.rightPanel.Style = lipgloss.NewStyle().BorderForeground(a.theme.Border)
 	} else {
-		a.leftPanel.Style = lipgloss.NewStyle().BorderForeground(unfocusedColor)
-		a.rightPanel.Style = lipgloss.NewStyle().BorderForeground(focusedColor)
+		a.leftPanel.Style = lipgloss.NewStyle().BorderForeground(a.theme.Border)
+		a.rightPanel.Style = lipgloss.NewStyle().BorderForeground(a.theme.BorderFocused)
 	}
 }
 
