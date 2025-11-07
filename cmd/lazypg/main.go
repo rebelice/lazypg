@@ -15,7 +15,7 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Printf("Warning: Could not load config: %v (using defaults)\n", err)
-		cfg = &config.Config{} // Use zero values as fallback
+		cfg = config.GetDefaults()
 	}
 
 	// Create program with mouse support based on config

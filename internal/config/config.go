@@ -59,6 +59,47 @@ type PerformanceConfig struct {
 	MetadataCacheTTL   int `mapstructure:"metadata_cache_ttl"`
 }
 
+// GetDefaults returns a Config with all default values
+func GetDefaults() *Config {
+	return &Config{
+		General: GeneralConfig{
+			AutoConnectLast:       false,
+			ConfirmDestructiveOps: true,
+			DefaultLimit:          100,
+		},
+		UI: UIConfig{
+			Theme:             "default",
+			MouseEnabled:      true,
+			PanelWidthRatio:   25,
+			ShowBreadcrumbs:   true,
+			CommandPaletteKey: "ctrl+k",
+		},
+		Editor: EditorConfig{
+			TabSize:      2,
+			UseSpaces:    true,
+			AutoComplete: true,
+			FormatOnSave: false,
+		},
+		Data: DataConfig{
+			VirtualScrollBuffer:  100,
+			MaxCellDisplayLength: 100,
+			JSONBAutoFormat:      true,
+			LargeTableThreshold:  1000000,
+		},
+		History: HistoryConfig{
+			Enabled:           true,
+			MaxEntries:        1000,
+			Persist:           true,
+			SaveFailedQueries: true,
+		},
+		Performance: PerformanceConfig{
+			ConnectionPoolSize: 10,
+			QueryTimeout:       30000,
+			MetadataCacheTTL:   300,
+		},
+	}
+}
+
 // Load loads configuration from files
 func Load() (*Config, error) {
 	v := viper.New()
