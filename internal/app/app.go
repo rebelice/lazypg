@@ -23,6 +23,10 @@ type App struct {
 	// Phase 2: Connection management
 	connectionManager *connection.Manager
 	discoverer        *discovery.Discoverer
+
+	// Connection dialog
+	showConnectionDialog bool
+	connectionDialog     *components.ConnectionDialog
 }
 
 // New creates a new App instance with config
@@ -47,6 +51,7 @@ func New(cfg *config.Config) *App {
 		theme:             th,
 		connectionManager: connection.NewManager(),
 		discoverer:        discovery.NewDiscoverer(),
+		connectionDialog:  components.NewConnectionDialog(),
 		leftPanel: components.Panel{
 			Title:   "Navigation",
 			Content: "Databases\n└─ (empty)",
@@ -75,6 +80,11 @@ func (a *App) Init() tea.Cmd {
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Handle connection dialog first if visible
+		if a.showConnectionDialog {
+			return a.handleConnectionDialog(msg)
+		}
+
 		switch msg.String() {
 		case "q", "ctrl+c":
 			// Don't quit if in help mode, exit help instead
@@ -95,6 +105,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.state.ViewMode == models.HelpMode {
 				a.state.ViewMode = models.NormalMode
 			}
+		case "c":
+			// Open connection dialog
+			a.showConnectionDialog = true
+			// TODO: Trigger discovery
+			return a, nil
 		case "tab":
 			// Only handle tab in normal mode
 			if a.state.ViewMode == models.NormalMode {
@@ -116,6 +131,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View implements tea.Model
 func (a *App) View() string {
+	// If connection dialog is showing, render it
+	if a.showConnectionDialog {
+		return a.renderConnectionDialog()
+	}
+
 	// If in help mode, show help overlay
 	if a.state.ViewMode == models.HelpMode {
 		return help.Render(a.state.Width, a.state.Height, lipgloss.NewStyle())
@@ -237,4 +257,75 @@ func (a *App) formatStatusBar(left, right string) string {
 	}
 
 	return left + lipgloss.NewStyle().Width(spacing).Render("") + right
+}
+
+// handleConnectionDialog handles key events when connection dialog is visible
+func (a *App) handleConnectionDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		a.showConnectionDialog = false
+		return a, nil
+
+	case "up", "k":
+		a.connectionDialog.MoveSelection(-1)
+		return a, nil
+
+	case "down", "j":
+		a.connectionDialog.MoveSelection(1)
+		return a, nil
+
+	case "m":
+		a.connectionDialog.ManualMode = !a.connectionDialog.ManualMode
+		return a, nil
+
+	case "enter":
+		// TODO: Implement connection logic
+		a.showConnectionDialog = false
+		return a, nil
+
+	case "backspace":
+		if a.connectionDialog.ManualMode {
+			a.connectionDialog.HandleBackspace()
+		}
+		return a, nil
+
+	default:
+		// Handle text input in manual mode
+		if a.connectionDialog.ManualMode {
+			// Only handle printable characters
+			key := msg.String()
+			if len(key) == 1 {
+				a.connectionDialog.HandleInput(rune(key[0]))
+			}
+		}
+		return a, nil
+	}
+}
+
+// renderConnectionDialog renders the connection dialog centered on screen
+func (a *App) renderConnectionDialog() string {
+	// Center the dialog
+	dialogWidth := 60
+	dialogHeight := 20
+
+	a.connectionDialog.Width = dialogWidth
+	a.connectionDialog.Height = dialogHeight
+
+	dialog := a.connectionDialog.View()
+
+	// Center it
+	verticalPadding := (a.state.Height - dialogHeight) / 2
+	horizontalPadding := (a.state.Width - dialogWidth) / 2
+
+	if verticalPadding < 0 {
+		verticalPadding = 0
+	}
+	if horizontalPadding < 0 {
+		horizontalPadding = 0
+	}
+
+	style := lipgloss.NewStyle().
+		Padding(verticalPadding, 0, 0, horizontalPadding)
+
+	return style.Render(dialog)
 }
