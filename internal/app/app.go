@@ -6,6 +6,7 @@ import (
 	"github.com/rebeliceyang/lazypg/internal/config"
 	"github.com/rebeliceyang/lazypg/internal/models"
 	"github.com/rebeliceyang/lazypg/internal/ui/components"
+	"github.com/rebeliceyang/lazypg/internal/ui/help"
 	"github.com/rebeliceyang/lazypg/internal/ui/theme"
 )
 
@@ -68,15 +69,34 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
-			return a, tea.Quit
-		case "tab":
-			// Toggle focus between panels
-			if a.state.FocusedPanel == models.LeftPanel {
-				a.state.FocusedPanel = models.RightPanel
-			} else {
-				a.state.FocusedPanel = models.LeftPanel
+			// Don't quit if in help mode, exit help instead
+			if a.state.ViewMode == models.HelpMode {
+				a.state.ViewMode = models.NormalMode
+				return a, nil
 			}
-			a.updatePanelStyles()
+			return a, tea.Quit
+		case "?":
+			// Toggle help
+			if a.state.ViewMode == models.HelpMode {
+				a.state.ViewMode = models.NormalMode
+			} else {
+				a.state.ViewMode = models.HelpMode
+			}
+		case "esc":
+			// Exit help mode
+			if a.state.ViewMode == models.HelpMode {
+				a.state.ViewMode = models.NormalMode
+			}
+		case "tab":
+			// Only handle tab in normal mode
+			if a.state.ViewMode == models.NormalMode {
+				if a.state.FocusedPanel == models.LeftPanel {
+					a.state.FocusedPanel = models.RightPanel
+				} else {
+					a.state.FocusedPanel = models.LeftPanel
+				}
+				a.updatePanelStyles()
+			}
 		}
 	case tea.WindowSizeMsg:
 		a.state.Width = msg.Width
@@ -88,6 +108,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View implements tea.Model
 func (a *App) View() string {
+	// If in help mode, show help overlay
+	if a.state.ViewMode == models.HelpMode {
+		return help.Render(a.state.Width, a.state.Height, lipgloss.NewStyle())
+	}
+
+	// Normal view rendering
 	// Calculate status bar content dynamically
 	topBarLeft := "lazypg"
 	topBarRight := "⌘K"

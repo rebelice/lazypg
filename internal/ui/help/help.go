@@ -1,0 +1,121 @@
+package help
+
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
+
+// KeyBinding represents a keyboard shortcut
+type KeyBinding struct {
+	Key         string
+	Description string
+}
+
+// GetGlobalKeys returns global key bindings
+func GetGlobalKeys() []KeyBinding {
+	return []KeyBinding{
+		{"?", "Toggle help"},
+		{"q, Ctrl+C", "Quit application"},
+		{"Ctrl+K", "Open command palette"},
+		{"Ctrl+P", "Quick query"},
+		{"Tab", "Switch panel focus"},
+		{"r, F5", "Refresh current view"},
+	}
+}
+
+// GetNavigationKeys returns navigation key bindings
+func GetNavigationKeys() []KeyBinding {
+	return []KeyBinding{
+		{"↑/k", "Move up"},
+		{"↓/j", "Move down"},
+		{"←/h", "Collapse or move left"},
+		{"→/l", "Expand or move right"},
+		{"Enter", "Select item"},
+		{"Backspace", "Go to parent"},
+	}
+}
+
+// GetDataViewKeys returns data view key bindings
+func GetDataViewKeys() []KeyBinding {
+	return []KeyBinding{
+		{"f, /", "Add filter"},
+		{"Shift+F", "Exclude filter"},
+		{"c", "Copy cell"},
+		{"Shift+C", "Copy row"},
+		{"e", "Edit cell"},
+		{"s", "Sort ascending"},
+		{"Shift+S", "Sort descending"},
+	}
+}
+
+// Render creates the help view
+func Render(width, height int, theme lipgloss.Style) string {
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("62")).
+		Padding(1, 0)
+
+	sectionStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("75")).
+		Padding(0, 0, 0, 2)
+
+	keyStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("220")).
+		Width(20)
+
+	descStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("252"))
+
+	var b strings.Builder
+
+	// Title
+	b.WriteString(titleStyle.Render("lazypg - Keyboard Shortcuts"))
+	b.WriteString("\n\n")
+
+	// Global keys
+	b.WriteString(sectionStyle.Render("Global"))
+	b.WriteString("\n")
+	for _, kb := range GetGlobalKeys() {
+		b.WriteString("  ")
+		b.WriteString(keyStyle.Render(kb.Key))
+		b.WriteString(descStyle.Render(kb.Description))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+
+	// Navigation keys
+	b.WriteString(sectionStyle.Render("Navigation"))
+	b.WriteString("\n")
+	for _, kb := range GetNavigationKeys() {
+		b.WriteString("  ")
+		b.WriteString(keyStyle.Render(kb.Key))
+		b.WriteString(descStyle.Render(kb.Description))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+
+	// Data view keys
+	b.WriteString(sectionStyle.Render("Data View"))
+	b.WriteString("\n")
+	for _, kb := range GetDataViewKeys() {
+		b.WriteString("  ")
+		b.WriteString(keyStyle.Render(kb.Key))
+		b.WriteString(descStyle.Render(kb.Description))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+
+	b.WriteString(lipgloss.NewStyle().Faint(true).Render("Press '?' or Esc to close help"))
+
+	// Wrap in a box
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("62")).
+		Padding(1, 2).
+		Width(width - 4).
+		Height(height - 4)
+
+	return boxStyle.Render(b.String())
+}
