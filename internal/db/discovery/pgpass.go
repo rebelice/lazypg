@@ -2,8 +2,10 @@ package discovery
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -27,6 +29,23 @@ func ParsePgPass() ([]PgPassEntry, error) {
 	}
 
 	pgpassPath := filepath.Join(home, ".pgpass")
+
+	// Check file permissions on non-Windows systems
+	if runtime.GOOS != "windows" {
+		fileInfo, err := os.Stat(pgpassPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return []PgPassEntry{}, nil
+			}
+			return nil, err
+		}
+
+		mode := fileInfo.Mode()
+		if mode.Perm()&0077 != 0 {
+			return nil, fmt.Errorf(".pgpass file has insecure permissions %v, must be 0600", mode.Perm())
+		}
+	}
+
 	file, err := os.Open(pgpassPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -60,17 +79,45 @@ func ParsePgPass() ([]PgPassEntry, error) {
 
 // parsePgPassLine parses a single .pgpass line
 // Format: hostname:port:database:username:password
+// Handles escape sequences: \: and \\
 func parsePgPassLine(line string) (PgPassEntry, error) {
-	parts := strings.Split(line, ":")
+	parts := make([]string, 0, 5)
+	var current strings.Builder
+	escaped := false
+
+	for i := 0; i < len(line); i++ {
+		ch := line[i]
+
+		if escaped {
+			current.WriteByte(ch)
+			escaped = false
+		} else if ch == '\\' {
+			escaped = true
+		} else if ch == ':' {
+			parts = append(parts, current.String())
+			current.Reset()
+		} else {
+			current.WriteByte(ch)
+		}
+	}
+
+	// Add the last field
+	parts = append(parts, current.String())
+
 	if len(parts) != 5 {
 		return PgPassEntry{}, os.ErrInvalid
 	}
 
 	port := 5432
 	if parts[1] != "*" {
-		if p, err := strconv.Atoi(parts[1]); err == nil {
-			port = p
+		p, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return PgPassEntry{}, fmt.Errorf("invalid port: %s", parts[1])
 		}
+		if p < 1 || p > 65535 {
+			return PgPassEntry{}, fmt.Errorf("port out of range: %d", p)
+		}
+		port = p
 	}
 
 	return PgPassEntry{
