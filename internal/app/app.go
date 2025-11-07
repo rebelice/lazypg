@@ -4,6 +4,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/rebeliceyang/lazypg/internal/config"
+	"github.com/rebeliceyang/lazypg/internal/db/connection"
+	"github.com/rebeliceyang/lazypg/internal/db/discovery"
 	"github.com/rebeliceyang/lazypg/internal/models"
 	"github.com/rebeliceyang/lazypg/internal/ui/components"
 	"github.com/rebeliceyang/lazypg/internal/ui/help"
@@ -17,6 +19,10 @@ type App struct {
 	theme      theme.Theme
 	leftPanel  components.Panel
 	rightPanel components.Panel
+
+	// Phase 2: Connection management
+	connectionManager *connection.Manager
+	discoverer        *discovery.Discoverer
 }
 
 // New creates a new App instance with config
@@ -36,9 +42,11 @@ func New(cfg *config.Config) *App {
 	}
 
 	app := &App{
-		state:  state,
-		config: cfg,
-		theme:  th,
+		state:             state,
+		config:            cfg,
+		theme:             th,
+		connectionManager: connection.NewManager(),
+		discoverer:        discovery.NewDiscoverer(),
 		leftPanel: components.Panel{
 			Title:   "Navigation",
 			Content: "Databases\n└─ (empty)",
