@@ -20,7 +20,18 @@ func GetGlobalKeys() []KeyBinding {
 		{"Ctrl+K", "Open command palette"},
 		{"Ctrl+P", "Quick query"},
 		{"Tab", "Switch panel focus"},
+		{"c", "Open connection dialog"},
 		{"r, F5", "Refresh current view"},
+	}
+}
+
+// GetConnectionKeys returns connection key bindings
+func GetConnectionKeys() []KeyBinding {
+	return []KeyBinding{
+		{"c", "Connect to database"},
+		{"d", "Disconnect"},
+		{"Ctrl+R", "Reconnect"},
+		{"Ctrl+D", "Show all connections"},
 	}
 }
 
@@ -78,6 +89,17 @@ func Render(width, height int, theme lipgloss.Style) string {
 	b.WriteString(sectionStyle.Render("Global"))
 	b.WriteString("\n")
 	for _, kb := range GetGlobalKeys() {
+		b.WriteString("  ")
+		b.WriteString(keyStyle.Render(kb.Key))
+		b.WriteString(descStyle.Render(kb.Description))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+
+	// Connection keys
+	b.WriteString(sectionStyle.Render("Connection"))
+	b.WriteString("\n")
+	for _, kb := range GetConnectionKeys() {
 		b.WriteString("  ")
 		b.WriteString(keyStyle.Render(kb.Key))
 		b.WriteString(descStyle.Render(kb.Description))
