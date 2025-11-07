@@ -2,9 +2,21 @@ package metadata
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/rebeliceyang/lazypg/internal/db/connection"
 )
+
+// toString safely converts an interface{} to string
+func toString(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return fmt.Sprintf("%v", v)
+}
 
 // Database represents a PostgreSQL database
 type Database struct {
@@ -33,9 +45,9 @@ func ListDatabases(ctx context.Context, pool *connection.Pool) ([]Database, erro
 	databases := make([]Database, 0, len(rows))
 	for _, row := range rows {
 		databases = append(databases, Database{
-			Name:  row["name"].(string),
-			Owner: row["owner"].(string),
-			Size:  row["size"].(string),
+			Name:  toString(row["name"]),
+			Owner: toString(row["owner"]),
+			Size:  toString(row["size"]),
 		})
 	}
 

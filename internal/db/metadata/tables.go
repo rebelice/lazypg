@@ -2,9 +2,21 @@ package metadata
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/rebeliceyang/lazypg/internal/db/connection"
 )
+
+// toString safely converts an interface{} to string
+func toString(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return fmt.Sprintf("%v", v)
+}
 
 // Schema represents a PostgreSQL schema
 type Schema struct {
@@ -39,8 +51,8 @@ func ListSchemas(ctx context.Context, pool *connection.Pool) ([]Schema, error) {
 	schemas := make([]Schema, 0, len(rows))
 	for _, row := range rows {
 		schemas = append(schemas, Schema{
-			Name:  row["name"].(string),
-			Owner: row["owner"].(string),
+			Name:  toString(row["name"]),
+			Owner: toString(row["owner"]),
 		})
 	}
 
@@ -67,9 +79,10 @@ func ListTables(ctx context.Context, pool *connection.Pool, schema string) ([]Ta
 	tables := make([]Table, 0, len(rows))
 	for _, row := range rows {
 		tables = append(tables, Table{
-			Schema: row["schema"].(string),
-			Name:   row["name"].(string),
-			Size:   row["size"].(string),
+			Schema:   toString(row["schema"]),
+			Name:     toString(row["name"]),
+			RowCount: 0, // Not populated by ListTables - use GetTableRowCount for specific tables
+			Size:     toString(row["size"]),
 		})
 	}
 
@@ -91,7 +104,7 @@ func GetTableRowCount(ctx context.Context, pool *connection.Pool, schema, table 
 
 	estimate, ok := row["estimate"].(int64)
 	if !ok {
-		return 0, nil
+		return 0, fmt.Errorf("invalid row count estimate type: %T", row["estimate"])
 	}
 
 	return estimate, nil
