@@ -2,21 +2,9 @@ package metadata
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/rebeliceyang/lazypg/internal/db/connection"
 )
-
-// toString safely converts an interface{} to string
-func toString(v interface{}) string {
-	if v == nil {
-		return ""
-	}
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return fmt.Sprintf("%v", v)
-}
 
 // Database represents a PostgreSQL database
 type Database struct {
