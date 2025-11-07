@@ -4,7 +4,7 @@ A modern Terminal User Interface (TUI) client for PostgreSQL, inspired by lazygi
 
 ## Status
 
-🚧 **In Development** - Phase 1 (Foundation) Complete
+🚧 **In Development** - Phase 2 (Connection & Discovery) Complete
 
 ### Completed Features
 
@@ -14,12 +14,17 @@ A modern Terminal User Interface (TUI) client for PostgreSQL, inspired by lazygi
 - ✅ Help system with keyboard shortcuts
 - ✅ Panel focus management
 - ✅ Responsive layout
+- ✅ PostgreSQL connection management
+- ✅ Connection pooling with pgx v5
+- ✅ Auto-discovery (port scan, environment, .pgpass)
+- ✅ Connection dialog UI
+- ✅ Basic metadata queries
 
 ### In Progress
 
-- 🔄 Database connection management
 - 🔄 Navigation tree
 - 🔄 Data browsing
+- 🔄 Table viewing
 
 ## Installation
 
@@ -51,6 +56,7 @@ make run
 
 lazypg looks for configuration in:
 - `~/.config/lazypg/config.yaml` (user config)
+- `~/.config/lazypg/connections.yaml` (saved connections)
 - `./config.yaml` (current directory)
 
 See `config/default.yaml` for all available options.
@@ -62,6 +68,25 @@ ui:
   theme: "default"
   panel_width_ratio: 25
   mouse_enabled: true
+```
+
+Example connection config (`~/.config/lazypg/connections.yaml`):
+
+```yaml
+connections:
+  - name: "Local Dev"
+    host: localhost
+    port: 5432
+    database: mydb
+    user: postgres
+    ssl_mode: prefer
+
+  - name: "Production"
+    host: prod-db.example.com
+    port: 5432
+    database: prod_db
+    user: app_user
+    ssl_mode: require
 ```
 
 ## Development
@@ -96,12 +121,14 @@ make fmt
 - Theme support
 - Help system
 
-### Phase 2: Connection & Discovery (Next)
+### Phase 2: Connection & Discovery ✅
 - PostgreSQL connection management
+- Connection pool with pgx
 - Auto-discovery of local instances
-- Connection pool
+- Connection manager UI
+- Metadata queries
 
-### Phase 3: Data Browsing
+### Phase 3: Data Browsing (Next)
 - Navigation tree
 - Table data viewing
 - Virtual scrolling
