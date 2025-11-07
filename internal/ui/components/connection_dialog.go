@@ -126,6 +126,53 @@ func (c *ConnectionDialog) renderManualMode() string {
 	return b.String()
 }
 
+// HandleInput processes text input for the active field in manual mode
+func (c *ConnectionDialog) HandleInput(char rune) {
+	if !c.ManualMode {
+		return
+	}
+
+	switch c.ActiveField {
+	case 0:
+		c.Host += string(char)
+	case 1:
+		c.Port += string(char)
+	case 2:
+		c.Database += string(char)
+	case 3:
+		c.User += string(char)
+	case 4:
+		c.Password += string(char)
+	}
+}
+
+// HandleBackspace removes the last character from the active field
+func (c *ConnectionDialog) HandleBackspace() {
+	if !c.ManualMode {
+		return
+	}
+
+	var field *string
+	switch c.ActiveField {
+	case 0:
+		field = &c.Host
+	case 1:
+		field = &c.Port
+	case 2:
+		field = &c.Database
+	case 3:
+		field = &c.User
+	case 4:
+		field = &c.Password
+	default:
+		return
+	}
+
+	if len(*field) > 0 {
+		*field = (*field)[:len(*field)-1]
+	}
+}
+
 // MoveSelection moves the selection up or down
 func (c *ConnectionDialog) MoveSelection(delta int) {
 	if c.ManualMode {
@@ -137,6 +184,10 @@ func (c *ConnectionDialog) MoveSelection(delta int) {
 			c.ActiveField = 0
 		}
 	} else {
+		if len(c.DiscoveredInstances) == 0 {
+			c.SelectedIndex = 0
+			return
+		}
 		c.SelectedIndex += delta
 		if c.SelectedIndex < 0 {
 			c.SelectedIndex = 0
@@ -155,8 +206,18 @@ func (c *ConnectionDialog) GetSelectedInstance() *models.DiscoveredInstance {
 	return &c.DiscoveredInstances[c.SelectedIndex]
 }
 
-// GetManualConfig returns the manual connection config
-func (c *ConnectionDialog) GetManualConfig() models.ConnectionConfig {
+// GetManualConfig returns the manual connection config if valid, or error
+func (c *ConnectionDialog) GetManualConfig() (models.ConnectionConfig, error) {
+	if c.Host == "" {
+		return models.ConnectionConfig{}, fmt.Errorf("host is required")
+	}
+	if c.User == "" {
+		return models.ConnectionConfig{}, fmt.Errorf("user is required")
+	}
+	if c.Database == "" {
+		return models.ConnectionConfig{}, fmt.Errorf("database is required")
+	}
+
 	return models.ConnectionConfig{
 		Host:     c.Host,
 		Port:     mustParseInt(c.Port, 5432),
@@ -164,7 +225,7 @@ func (c *ConnectionDialog) GetManualConfig() models.ConnectionConfig {
 		User:     c.User,
 		Password: c.Password,
 		SSLMode:  "prefer",
-	}
+	}, nil
 }
 
 func mustParseInt(s string, defaultVal int) int {
