@@ -28,7 +28,6 @@ func GetGlobalKeys() []KeyBinding {
 // GetConnectionKeys returns connection key bindings
 func GetConnectionKeys() []KeyBinding {
 	return []KeyBinding{
-		{"c", "Connect to database"},
 		{"d", "Disconnect"},
 		{"Ctrl+R", "Reconnect"},
 		{"Ctrl+D", "Show all connections"},
