@@ -4,10 +4,14 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/rebeliceyang/lazypg/internal/models"
 )
+
+// DefaultPorts are the default PostgreSQL ports to scan
+var DefaultPorts = []int{5432, 5433, 5434, 5435}
 
 // Scanner discovers PostgreSQL instances
 type Scanner struct {
@@ -24,21 +28,34 @@ func NewScanner() *Scanner {
 // ScanPorts scans for PostgreSQL on common ports
 func (s *Scanner) ScanPorts(ctx context.Context, host string, ports []int) []models.DiscoveredInstance {
 	if len(ports) == 0 {
-		ports = []int{5432, 5433, 5434, 5435}
+		ports = DefaultPorts
 	}
 
-	instances := make([]models.DiscoveredInstance, 0)
+	instances := make([]models.DiscoveredInstance, 0, len(ports))
 	resultChan := make(chan models.DiscoveredInstance, len(ports))
 
+	var wg sync.WaitGroup
 	for _, port := range ports {
+		if ctx.Err() != nil {
+			break
+		}
+		wg.Add(1)
 		go func(p int) {
+			defer wg.Done()
 			instance := s.scanPort(ctx, host, p)
-			resultChan <- instance
+			select {
+			case resultChan <- instance:
+			case <-ctx.Done():
+			}
 		}(port)
 	}
 
-	for range ports {
-		instance := <-resultChan
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	for instance := range resultChan {
 		if instance.Available {
 			instances = append(instances, instance)
 		}
@@ -78,5 +95,5 @@ func (s *Scanner) scanPort(ctx context.Context, host string, port int) models.Di
 
 // ScanLocalhost scans for PostgreSQL on localhost
 func (s *Scanner) ScanLocalhost(ctx context.Context) []models.DiscoveredInstance {
-	return s.ScanPorts(ctx, "localhost", []int{5432, 5433, 5434, 5435})
+	return s.ScanPorts(ctx, "localhost", DefaultPorts)
 }
