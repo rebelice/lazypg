@@ -3,6 +3,7 @@ package discovery
 import (
 	"context"
 	"sort"
+	"strconv"
 
 	"github.com/rebeliceyang/lazypg/internal/models"
 )
@@ -52,7 +53,7 @@ func deduplicateInstances(instances []models.DiscoveredInstance) []models.Discov
 	seen := make(map[string]models.DiscoveredInstance)
 
 	for _, instance := range instances {
-		key := instance.Host + ":" + string(rune(instance.Port))
+		key := instance.Host + ":" + strconv.Itoa(instance.Port)
 
 		// Keep the one with higher priority source
 		if existing, exists := seen[key]; !exists || instance.Source < existing.Source {
