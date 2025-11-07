@@ -18,7 +18,7 @@ func ParseEnvironment() *models.DiscoveredInstance {
 
 	port := 5432
 	if portStr != "" {
-		if p, err := strconv.Atoi(portStr); err == nil {
+		if p, err := strconv.Atoi(portStr); err == nil && p > 0 && p <= 65535 {
 			port = p
 		}
 	}
@@ -57,7 +57,7 @@ func GetEnvironmentConfig() *models.ConnectionConfig {
 
 	port := 5432
 	if portStr != "" {
-		if p, err := strconv.Atoi(portStr); err == nil {
+		if p, err := strconv.Atoi(portStr); err == nil && p > 0 && p <= 65535 {
 			port = p
 		}
 	}
