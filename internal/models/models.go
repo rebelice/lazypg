@@ -7,6 +7,13 @@ type AppState struct {
 	LeftPanelWidth int
 	FocusedPanel   PanelType
 	ViewMode       ViewMode
+
+	// Connection state (Phase 2)
+	ConnectionManager interface{} // Will hold *connection.Manager
+	ActiveConnection  *Connection
+	Databases         []string
+	CurrentDatabase   string
+	CurrentSchema     string
 }
 
 // PanelType identifies which panel is focused
