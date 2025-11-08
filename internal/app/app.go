@@ -294,14 +294,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
-		// Check if this is initial load or pagination
-		if len(a.tableView.Rows) == 0 {
-			// Initial load
+		// Check if this is initial load (offset 0) or pagination
+		// We need to check both empty rows AND if columns changed (new table selected)
+		isInitialLoad := len(a.tableView.Rows) == 0 ||
+			len(msg.Columns) > 0 && len(a.tableView.Columns) > 0 && msg.Columns[0] != a.tableView.Columns[0]
+
+		if isInitialLoad {
+			// Initial load - replace all data
 			a.tableView.SetData(msg.Columns, msg.Rows, msg.TotalRows)
+			a.tableView.SelectedRow = 0
+			a.tableView.TopRow = 0
 			a.state.FocusedPanel = models.RightPanel
 			a.updatePanelStyles()
 		} else {
-			// Append paginated data
+			// Append paginated data (same table, loading more rows)
 			a.tableView.Rows = append(a.tableView.Rows, msg.Rows...)
 			a.tableView.TotalRows = msg.TotalRows
 		}
@@ -342,31 +348,51 @@ func (a *App) View() string {
 // renderNormalView renders the normal application view
 func (a *App) renderNormalView() string {
 
-	// Normal view rendering
-	// Calculate status bar content dynamically
-	topBarLeft := "lazypg"
-	topBarRight := "⌘K"
+	// Modern top bar with gradient-like effect
+	appNameStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("39")). // Bright blue
+		Background(lipgloss.Color("236"))
+
+	connStatus := ""
+	if a.state.ActiveConnection != nil {
+		connStatus = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("76")). // Green
+			Render(" ● Connected")
+	}
+
+	topBarLeft := appNameStyle.Render(" 󱘖 lazypg ") + connStatus
+	topBarRight := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("245")).
+		Render("Press ? for help")
 	topBarContent := a.formatStatusBar(topBarLeft, topBarRight)
 
-	// Top bar with theme colors
 	topBar := lipgloss.NewStyle().
 		Width(a.state.Width).
-		Background(a.theme.BorderFocused).
-		Foreground(lipgloss.Color("230")).
-		Padding(0, 2).
+		Background(lipgloss.Color("236")).
+		Foreground(lipgloss.Color("254")).
 		Render(topBarContent)
 
-	// Calculate bottom bar content dynamically
-	bottomBarLeft := "[tab] Switch panel | [q] Quit"
-	bottomBarRight := "⌘K Command"
+	// Modern bottom bar with better contrast
+	bottomBarLeft := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("111")).
+		Render("󰌑 tab") + lipgloss.NewStyle().
+		Foreground(lipgloss.Color("245")).
+		Render(" switch │ ") +
+		lipgloss.NewStyle().
+		Foreground(lipgloss.Color("111")).
+		Render("q") + lipgloss.NewStyle().
+		Foreground(lipgloss.Color("245")).
+		Render(" quit")
+
+	bottomBarRight := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("245")).
+		Render("⌘K command palette")
 	bottomBarContent := a.formatStatusBar(bottomBarLeft, bottomBarRight)
 
-	// Bottom bar with theme colors
 	bottomBar := lipgloss.NewStyle().
 		Width(a.state.Width).
-		Background(a.theme.Selection).
-		Foreground(a.theme.Foreground).
-		Padding(0, 2).
+		Background(lipgloss.Color("235")).
 		Render(bottomBarContent)
 
 	// Update tree view dimensions and render

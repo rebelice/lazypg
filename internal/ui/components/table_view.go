@@ -124,8 +124,12 @@ func (tv *TableView) renderHeader() string {
 		width := tv.ColumnWidths[i]
 		parts = append(parts, tv.pad(col, width))
 	}
-	headerStyle := lipgloss.NewStyle().Bold(true)
-	return headerStyle.Render(strings.Join(parts, " │ "))
+	// Modern header style with color
+	headerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("105")). // Purple
+		Background(lipgloss.Color("236"))  // Dark gray background
+	return headerStyle.Render(" " + strings.Join(parts, " │ ") + " ")
 }
 
 func (tv *TableView) renderSeparator() string {
@@ -133,7 +137,9 @@ func (tv *TableView) renderSeparator() string {
 	for _, width := range tv.ColumnWidths {
 		parts = append(parts, strings.Repeat("─", width))
 	}
-	return strings.Join(parts, "─┼─")
+	separatorStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240")) // Gray
+	return separatorStyle.Render("─" + strings.Join(parts, "─┼─") + "─")
 }
 
 func (tv *TableView) renderRow(row []string, selected bool) string {
@@ -146,17 +152,30 @@ func (tv *TableView) renderRow(row []string, selected bool) string {
 		parts = append(parts, tv.pad(cell, width))
 	}
 
-	line := strings.Join(parts, " │ ")
+	line := " " + strings.Join(parts, " │ ") + " "
 
 	if selected {
-		return lipgloss.NewStyle().Background(lipgloss.Color("62")).Render(line)
+		// Modern selection with gradient-like effect
+		return lipgloss.NewStyle().
+			Background(lipgloss.Color("25")). // Brighter blue
+			Foreground(lipgloss.Color("15")). // White text
+			Bold(true).
+			Render(line)
 	}
 	return line
 }
 
 func (tv *TableView) renderStatus() string {
-	showing := fmt.Sprintf("Rows %d-%d of %d", tv.TopRow+1, tv.TopRow+len(tv.Rows), tv.TotalRows)
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(showing)
+	endRow := tv.TopRow + len(tv.Rows)
+	if endRow > tv.TotalRows {
+		endRow = tv.TotalRows
+	}
+
+	showing := fmt.Sprintf(" 󰈙 %d-%d of %d rows", tv.TopRow+1, endRow, tv.TotalRows)
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color("245")). // Medium gray
+		Italic(true).
+		Render(showing)
 }
 
 func (tv *TableView) pad(s string, width int) string {
