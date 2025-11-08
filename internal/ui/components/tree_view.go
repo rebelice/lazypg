@@ -303,6 +303,18 @@ func (tv *TreeView) buildNodeLabel(node *models.TreeNode) string {
 			}
 		}
 
+	case models.TreeNodeTypeSchema:
+		// Show table count or "empty" for schemas
+		if node.Loaded {
+			childCount := len(node.Children)
+			dimStyle := lipgloss.NewStyle().Foreground(tv.Theme.Comment)
+			if childCount == 0 {
+				label += " " + dimStyle.Render("(empty)")
+			} else {
+				label += " " + dimStyle.Render(fmt.Sprintf("(%d)", childCount))
+			}
+		}
+
 	case models.TreeNodeTypeTable:
 		// Add row count if available
 		if meta, ok := node.Metadata.(map[string]interface{}); ok {
