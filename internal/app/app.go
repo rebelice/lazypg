@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -215,6 +216,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a, nil
 				case "down", "j":
 					a.tableView.MoveSelection(1)
+
+					// Check if we need to load more data (lazy loading)
+					if a.tableView.SelectedRow >= len(a.tableView.Rows)-10 &&
+						len(a.tableView.Rows) < a.tableView.TotalRows &&
+						a.currentTable != "" {
+						// Parse schema and table from currentTable
+						parts := strings.Split(a.currentTable, ".")
+						if len(parts) == 2 {
+							return a, func() tea.Msg {
+								return LoadTableDataMsg{
+									Schema: parts[0],
+									Table:  parts[1],
+									Offset: len(a.tableView.Rows),
+									Limit:  100,
+								}
+							}
+						}
+					}
 					return a, nil
 				case "ctrl+u":
 					a.tableView.PageUp()
