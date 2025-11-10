@@ -53,6 +53,7 @@ func GetDataViewKeys() []KeyBinding {
 		{"f", "Open filter builder"},
 		{"Ctrl+F", "Quick filter from cell"},
 		{"Ctrl+R", "Clear filter"},
+		{"j", "Open JSONB viewer (on JSONB cell)"},
 		{"c", "Copy cell"},
 		{"Shift+C", "Copy row"},
 		{"e", "Edit cell"},

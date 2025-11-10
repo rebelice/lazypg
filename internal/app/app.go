@@ -19,6 +19,7 @@ import (
 	"github.com/rebeliceyang/lazypg/internal/db/query"
 	filterBuilder "github.com/rebeliceyang/lazypg/internal/filter"
 	"github.com/rebeliceyang/lazypg/internal/history"
+	"github.com/rebeliceyang/lazypg/internal/jsonb"
 	"github.com/rebeliceyang/lazypg/internal/models"
 	"github.com/rebeliceyang/lazypg/internal/ui/components"
 	"github.com/rebeliceyang/lazypg/internal/ui/help"
@@ -68,6 +69,10 @@ type App struct {
 	showFilterBuilder bool
 	filterBuilder     *components.FilterBuilder
 	activeFilter      *models.Filter
+
+	// JSONB viewer
+	showJSONBViewer bool
+	jsonbViewer     *components.JSONBViewer
 }
 
 // DiscoveryCompleteMsg is sent when discovery completes
@@ -157,6 +162,9 @@ func New(cfg *config.Config) *App {
 	// Initialize filter builder
 	filterBuilder := components.NewFilterBuilder(th)
 
+	// Initialize JSONB viewer
+	jsonbViewer := components.NewJSONBViewer(th)
+
 	app := &App{
 		state:             state,
 		config:            cfg,
@@ -174,6 +182,8 @@ func New(cfg *config.Config) *App {
 		showFilterBuilder: false,
 		filterBuilder:     filterBuilder,
 		activeFilter:      nil,
+		showJSONBViewer:   false,
+		jsonbViewer:       jsonbViewer,
 		leftPanel: components.Panel{
 			Title:   "Navigation",
 			Content: "Databases\n└─ (empty)",
@@ -314,6 +324,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.showFilterBuilder = false
 		return a, nil
 
+	case components.CloseJSONBViewerMsg:
+		a.showJSONBViewer = false
+		return a, nil
+
 	case ErrorMsg:
 		// Handle error messages
 		a.ShowError(msg.Title, msg.Message)
@@ -353,6 +367,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle filter builder input
 		if a.showFilterBuilder {
 			return a.handleFilterBuilder(msg)
+		}
+
+		// Handle JSONB viewer input
+		if a.showJSONBViewer {
+			return a.handleJSONBViewer(msg)
 		}
 
 		switch msg.String() {
@@ -484,7 +503,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case "up", "k":
 					a.tableView.MoveSelection(-1)
 					return a, nil
-				case "down", "j":
+				case "down":
 					a.tableView.MoveSelection(1)
 
 					// Check if we need to load more data (lazy loading)
@@ -510,6 +529,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a, nil
 				case "ctrl+d":
 					a.tableView.PageDown()
+					return a, nil
+				case "j":
+					// Open JSONB viewer if cell contains JSONB
+					selectedRow, selectedCol := a.tableView.GetSelectedCell()
+					if selectedRow >= 0 && selectedCol >= 0 && selectedRow < len(a.tableView.Rows) && selectedCol < len(a.tableView.Columns) {
+						cellValue := a.tableView.Rows[selectedRow][selectedCol]
+						if jsonb.IsJSONB(cellValue) {
+							if err := a.jsonbViewer.SetValue(cellValue); err == nil {
+								a.showJSONBViewer = true
+							}
+						}
+					}
 					return a, nil
 				case "enter", " ":
 					// Consume enter/space in table view (no action needed for now)
@@ -812,6 +843,19 @@ func (a *App) renderNormalView() string {
 		)
 	}
 
+	// Render JSONB viewer if visible
+	if a.showJSONBViewer {
+		mainView = lipgloss.Place(
+			a.state.Width,
+			a.state.Height,
+			lipgloss.Center,
+			lipgloss.Center,
+			a.jsonbViewer.View(),
+			lipgloss.WithWhitespaceChars(" "),
+			lipgloss.WithWhitespaceForeground(lipgloss.Color("#555555")),
+		)
+	}
+
 	return mainView
 }
 
@@ -1109,6 +1153,13 @@ func (a *App) handleQuickQuery(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (a *App) handleFilterBuilder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	a.filterBuilder, cmd = a.filterBuilder.Update(msg)
+	return a, cmd
+}
+
+// handleJSONBViewer handles key events when JSONB viewer is visible
+func (a *App) handleJSONBViewer(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	a.jsonbViewer, cmd = a.jsonbViewer.Update(msg)
 	return a, cmd
 }
 
