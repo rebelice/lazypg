@@ -21,6 +21,7 @@ type TableView struct {
 	TopRow       int
 	VisibleRows  int
 	SelectedRow  int
+	SelectedCol  int // Currently selected column
 	TotalRows    int
 
 	// Column widths (calculated)
@@ -98,7 +99,12 @@ func (tv *TableView) View() string {
 	b.WriteString("\n")
 
 	// Calculate how many rows we can show
-	tv.VisibleRows = tv.Height - 3 // Header + separator + status
+	// Height is already the content area height
+	// Subtract 3 for header + separator + status line
+	tv.VisibleRows = tv.Height - 3
+	if tv.VisibleRows < 1 {
+		tv.VisibleRows = 1
+	}
 
 	// Render visible rows
 	endRow := tv.TopRow + tv.VisibleRows
@@ -233,4 +239,9 @@ func (tv *TableView) PageDown() {
 			tv.TopRow = 0
 		}
 	}
+}
+
+// GetSelectedCell returns the currently selected row and column indices
+func (tv *TableView) GetSelectedCell() (row int, col int) {
+	return tv.SelectedRow, tv.SelectedCol
 }

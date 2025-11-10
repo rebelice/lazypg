@@ -404,6 +404,47 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return a, nil
+		case "ctrl+f":
+			// Quick filter from current cell
+			if a.state.FocusedPanel == models.RightPanel && a.tableView != nil {
+				selectedRow, selectedCol := a.tableView.GetSelectedCell()
+				if selectedRow >= 0 && selectedCol >= 0 && selectedCol < len(a.tableView.Columns) {
+					// Get column name and value
+					columnName := a.tableView.Columns[selectedCol]
+					cellValue := a.tableView.Rows[selectedRow][selectedCol]
+
+					// Create quick filter
+					columns := a.getTableColumns()
+					var columnInfo models.ColumnInfo
+					for _, col := range columns {
+						if col.Name == columnName {
+							columnInfo = col
+							break
+						}
+					}
+
+					// Create filter with single condition
+					quickFilter := models.Filter{
+						Schema:    a.state.TreeSelected.Parent.Label,
+						TableName: a.state.TreeSelected.Label,
+						RootGroup: models.FilterGroup{
+							Conditions: []models.FilterCondition{
+								{
+									Column:   columnName,
+									Operator: models.OpEqual,
+									Value:    cellValue,
+									Type:     columnInfo.DataType,
+								},
+							},
+							Logic: "AND",
+						},
+					}
+
+					a.activeFilter = &quickFilter
+					return a, a.loadTableDataWithFilter(quickFilter)
+				}
+			}
+			return a, nil
 		case "tab":
 			// Only handle tab in normal mode
 			if a.state.ViewMode == models.NormalMode {
