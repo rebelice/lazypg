@@ -75,17 +75,28 @@ func (m *Manager) Save() error {
 
 // Add adds a new favorite
 func (m *Manager) Add(name, description, query, connection, database string, tags []string) (*models.Favorite, error) {
+	// Validate inputs
+	name = strings.TrimSpace(name)
+	query = strings.TrimSpace(query)
+
 	if name == "" {
-		return nil, fmt.Errorf("name is required")
+		return nil, fmt.Errorf("favorite name cannot be empty")
 	}
 	if query == "" {
-		return nil, fmt.Errorf("query is required")
+		return nil, fmt.Errorf("favorite query cannot be empty")
+	}
+
+	// Check for duplicate names (case-insensitive)
+	for _, fav := range m.favorites {
+		if strings.EqualFold(fav.Name, name) {
+			return nil, fmt.Errorf("a favorite with the name '%s' already exists (names are case-insensitive)", name)
+		}
 	}
 
 	favorite := models.Favorite{
 		ID:          uuid.New().String(),
 		Name:        name,
-		Description: description,
+		Description: strings.TrimSpace(description),
 		Query:       query,
 		Tags:        tags,
 		Connection:  connection,
@@ -99,7 +110,7 @@ func (m *Manager) Add(name, description, query, connection, database string, tag
 	m.favorites = append(m.favorites, favorite)
 
 	if err := m.Save(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to save favorite: %w", err)
 	}
 
 	return &favorite, nil
@@ -107,17 +118,38 @@ func (m *Manager) Add(name, description, query, connection, database string, tag
 
 // Update updates an existing favorite
 func (m *Manager) Update(id string, name, description, query string, tags []string) error {
+	// Validate inputs
+	name = strings.TrimSpace(name)
+	query = strings.TrimSpace(query)
+
+	if name == "" {
+		return fmt.Errorf("favorite name cannot be empty")
+	}
+	if query == "" {
+		return fmt.Errorf("favorite query cannot be empty")
+	}
+
+	// Check for duplicate names (case-insensitive, excluding the current favorite)
+	for _, fav := range m.favorites {
+		if fav.ID != id && strings.EqualFold(fav.Name, name) {
+			return fmt.Errorf("a favorite with the name '%s' already exists (names are case-insensitive)", name)
+		}
+	}
+
 	for i, fav := range m.favorites {
 		if fav.ID == id {
 			m.favorites[i].Name = name
-			m.favorites[i].Description = description
+			m.favorites[i].Description = strings.TrimSpace(description)
 			m.favorites[i].Query = query
 			m.favorites[i].Tags = tags
 			m.favorites[i].UpdatedAt = time.Now()
-			return m.Save()
+			if err := m.Save(); err != nil {
+				return fmt.Errorf("failed to save favorite: %w", err)
+			}
+			return nil
 		}
 	}
-	return fmt.Errorf("favorite not found: %s", id)
+	return fmt.Errorf("favorite with ID '%s' was not found", id)
 }
 
 // Delete deletes a favorite by ID
@@ -125,10 +157,13 @@ func (m *Manager) Delete(id string) error {
 	for i, fav := range m.favorites {
 		if fav.ID == id {
 			m.favorites = append(m.favorites[:i], m.favorites[i+1:]...)
-			return m.Save()
+			if err := m.Save(); err != nil {
+				return fmt.Errorf("failed to save favorites after deletion: %w", err)
+			}
+			return nil
 		}
 	}
-	return fmt.Errorf("favorite not found: %s", id)
+	return fmt.Errorf("favorite with ID '%s' was not found", id)
 }
 
 // Get returns a favorite by ID
@@ -138,7 +173,7 @@ func (m *Manager) Get(id string) (*models.Favorite, error) {
 			return &fav, nil
 		}
 	}
-	return nil, fmt.Errorf("favorite not found: %s", id)
+	return nil, fmt.Errorf("favorite with ID '%s' was not found", id)
 }
 
 // GetAll returns all favorites
@@ -186,10 +221,13 @@ func (m *Manager) RecordUsage(id string) error {
 		if fav.ID == id {
 			m.favorites[i].UsageCount++
 			m.favorites[i].LastUsed = time.Now()
-			return m.Save()
+			if err := m.Save(); err != nil {
+				return fmt.Errorf("failed to save usage statistics: %w", err)
+			}
+			return nil
 		}
 	}
-	return fmt.Errorf("favorite not found: %s", id)
+	return fmt.Errorf("favorite with ID '%s' was not found", id)
 }
 
 // GetMostUsed returns the most frequently used favorites
@@ -226,6 +264,10 @@ func (m *Manager) GetRecent(limit int) []models.Favorite {
 
 // ExportToCSV exports all favorites to a CSV file
 func (m *Manager) ExportToCSV(customPath ...string) (string, error) {
+	if len(m.favorites) == 0 {
+		return "", fmt.Errorf("no favorites to export")
+	}
+
 	// Determine export path
 	path := filepath.Join(filepath.Dir(m.path), "favorites.csv")
 	if len(customPath) > 0 && customPath[0] != "" {
@@ -234,7 +276,7 @@ func (m *Manager) ExportToCSV(customPath ...string) (string, error) {
 
 	// Export favorites
 	if err := export.ExportToCSV(m.favorites, path); err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to export favorites to CSV: %w", err)
 	}
 
 	return path, nil
@@ -242,6 +284,10 @@ func (m *Manager) ExportToCSV(customPath ...string) (string, error) {
 
 // ExportToJSON exports all favorites to a JSON file
 func (m *Manager) ExportToJSON(customPath ...string) (string, error) {
+	if len(m.favorites) == 0 {
+		return "", fmt.Errorf("no favorites to export")
+	}
+
 	// Determine export path
 	path := filepath.Join(filepath.Dir(m.path), "favorites.json")
 	if len(customPath) > 0 && customPath[0] != "" {
@@ -250,7 +296,7 @@ func (m *Manager) ExportToJSON(customPath ...string) (string, error) {
 
 	// Export favorites
 	if err := export.ExportToJSON(m.favorites, path); err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to export favorites to JSON: %w", err)
 	}
 
 	return path, nil

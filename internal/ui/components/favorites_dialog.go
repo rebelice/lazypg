@@ -70,6 +70,12 @@ type FavoritesDialog struct {
 
 	// Search
 	searchQuery string
+
+	// Validation and errors
+	validationError string
+
+	// Delete confirmation
+	deleteConfirmMode bool
 }
 
 // NewFavoritesDialog creates a new favorites dialog
@@ -106,10 +112,17 @@ func (fd *FavoritesDialog) Update(msg tea.KeyMsg) (*FavoritesDialog, tea.Cmd) {
 func (fd *FavoritesDialog) handleListMode(msg tea.KeyMsg) (*FavoritesDialog, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q":
+		// Cancel delete confirmation if active
+		if fd.deleteConfirmMode {
+			fd.deleteConfirmMode = false
+			return fd, nil
+		}
 		return fd, func() tea.Msg {
 			return CloseFavoritesDialogMsg{}
 		}
 	case "up", "k":
+		// Cancel delete confirmation on navigation
+		fd.deleteConfirmMode = false
 		if fd.selected > 0 {
 			fd.selected--
 			if fd.selected < fd.offset {
@@ -117,6 +130,8 @@ func (fd *FavoritesDialog) handleListMode(msg tea.KeyMsg) (*FavoritesDialog, tea
 			}
 		}
 	case "down", "j":
+		// Cancel delete confirmation on navigation
+		fd.deleteConfirmMode = false
 		if fd.selected < len(fd.favorites)-1 {
 			fd.selected++
 			visibleHeight := fd.Height - 10
@@ -126,6 +141,9 @@ func (fd *FavoritesDialog) handleListMode(msg tea.KeyMsg) (*FavoritesDialog, tea
 		}
 	case "enter":
 		// Execute selected favorite
+		if len(fd.favorites) == 0 {
+			return fd, nil
+		}
 		if fd.selected < len(fd.favorites) {
 			fav := fd.favorites[fd.selected]
 			return fd, func() tea.Msg {
@@ -140,8 +158,13 @@ func (fd *FavoritesDialog) handleListMode(msg tea.KeyMsg) (*FavoritesDialog, tea
 		fd.queryInput = ""
 		fd.tagsInput = ""
 		fd.currentField = 0
+		fd.validationError = ""
+		fd.deleteConfirmMode = false
 	case "e":
 		// Edit selected favorite
+		if len(fd.favorites) == 0 {
+			return fd, nil
+		}
 		if fd.selected < len(fd.favorites) {
 			fav := fd.favorites[fd.selected]
 			fd.mode = FavoritesModeEdit
@@ -150,13 +173,25 @@ func (fd *FavoritesDialog) handleListMode(msg tea.KeyMsg) (*FavoritesDialog, tea
 			fd.queryInput = fav.Query
 			fd.tagsInput = strings.Join(fav.Tags, ", ")
 			fd.currentField = 0
+			fd.validationError = ""
+			fd.deleteConfirmMode = false
 		}
 	case "d", "x":
-		// Delete selected favorite
+		// Delete selected favorite with confirmation
+		if len(fd.favorites) == 0 {
+			return fd, nil
+		}
 		if fd.selected < len(fd.favorites) {
-			fav := fd.favorites[fd.selected]
-			return fd, func() tea.Msg {
-				return DeleteFavoriteMsg{FavoriteID: fav.ID}
+			if fd.deleteConfirmMode {
+				// Second press - confirm delete
+				fav := fd.favorites[fd.selected]
+				fd.deleteConfirmMode = false
+				return fd, func() tea.Msg {
+					return DeleteFavoriteMsg{FavoriteID: fav.ID}
+				}
+			} else {
+				// First press - enter confirmation mode
+				fd.deleteConfirmMode = true
 			}
 		}
 	}
@@ -167,14 +202,23 @@ func (fd *FavoritesDialog) handleEditMode(msg tea.KeyMsg) (*FavoritesDialog, tea
 	switch msg.String() {
 	case "esc":
 		fd.mode = FavoritesModeList
+		fd.validationError = ""
 	case "tab":
 		fd.currentField = (fd.currentField + 1) % 4
+		fd.validationError = "" // Clear validation error when moving between fields
 	case "shift+tab":
 		fd.currentField = (fd.currentField - 1 + 4) % 4
+		fd.validationError = "" // Clear validation error when moving between fields
 	case "backspace":
 		fd.deleteChar()
 	case "enter":
 		if fd.currentField == 3 {
+			// Validate inputs before saving
+			if err := fd.validateInputs(); err != nil {
+				fd.validationError = err.Error()
+				return fd, nil
+			}
+
 			// Parse tags from comma-separated string
 			tags := []string{}
 			if fd.tagsInput != "" {
@@ -190,9 +234,9 @@ func (fd *FavoritesDialog) handleEditMode(msg tea.KeyMsg) (*FavoritesDialog, tea
 			if fd.mode == FavoritesModeAdd {
 				cmd := func() tea.Msg {
 					return AddFavoriteMsg{
-						Name:        fd.nameInput,
-						Description: fd.descriptionInput,
-						Query:       fd.queryInput,
+						Name:        strings.TrimSpace(fd.nameInput),
+						Description: strings.TrimSpace(fd.descriptionInput),
+						Query:       strings.TrimSpace(fd.queryInput),
 						Tags:        tags,
 					}
 				}
@@ -204,9 +248,9 @@ func (fd *FavoritesDialog) handleEditMode(msg tea.KeyMsg) (*FavoritesDialog, tea
 				cmd := func() tea.Msg {
 					return EditFavoriteMsg{
 						FavoriteID:  fav.ID,
-						Name:        fd.nameInput,
-						Description: fd.descriptionInput,
-						Query:       fd.queryInput,
+						Name:        strings.TrimSpace(fd.nameInput),
+						Description: strings.TrimSpace(fd.descriptionInput),
+						Query:       strings.TrimSpace(fd.queryInput),
 						Tags:        tags,
 					}
 				}
@@ -266,6 +310,27 @@ func (fd *FavoritesDialog) clearInputs() {
 	fd.queryInput = ""
 	fd.tagsInput = ""
 	fd.currentField = 0
+	fd.validationError = ""
+}
+
+// validateInputs validates the form inputs
+func (fd *FavoritesDialog) validateInputs() error {
+	name := strings.TrimSpace(fd.nameInput)
+	query := strings.TrimSpace(fd.queryInput)
+
+	if name == "" {
+		return fmt.Errorf("Name is required")
+	}
+
+	if query == "" {
+		return fmt.Errorf("Query is required")
+	}
+
+	if len(name) > 100 {
+		return fmt.Errorf("Name is too long (max 100 characters)")
+	}
+
+	return nil
 }
 
 // View renders the dialog
@@ -296,9 +361,23 @@ func (fd *FavoritesDialog) renderList() string {
 		Padding(0, 1)
 	sections = append(sections, instrStyle.Render("↑↓: Navigate  Enter: Execute  a: Add  e: Edit  d: Delete  Esc: Close"))
 
+	// Delete confirmation warning
+	if fd.deleteConfirmMode && len(fd.favorites) > 0 {
+		warningStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#f38ba8")).
+			Background(lipgloss.Color("#45475a")).
+			Padding(0, 1).
+			Bold(true)
+		sections = append(sections, warningStyle.Render("⚠ Press 'd' again to confirm deletion, or Esc to cancel"))
+	}
+
 	// Favorites list
 	if len(fd.favorites) == 0 {
-		sections = append(sections, "\nNo favorites yet. Press 'a' to add one.")
+		emptyStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#a6adc8")).
+			Padding(1, 1)
+		emptyMsg := "No favorites yet.\n\nPress 'a' to add your first favorite query.\n\nFavorites let you save frequently used queries for quick access."
+		sections = append(sections, emptyStyle.Render(emptyMsg))
 	} else {
 		sections = append(sections, "")
 		visibleStart := fd.offset
@@ -328,7 +407,12 @@ func (fd *FavoritesDialog) renderList() string {
 
 			style := lipgloss.NewStyle().Padding(0, 1)
 			if i == fd.selected {
-				style = style.Background(fd.Theme.Selection).Foreground(fd.Theme.Foreground)
+				if fd.deleteConfirmMode {
+					// Show red highlight when delete confirmation is active
+					style = style.Background(lipgloss.Color("#f38ba8")).Foreground(lipgloss.Color("#1e1e2e"))
+				} else {
+					style = style.Background(fd.Theme.Selection).Foreground(fd.Theme.Foreground)
+				}
 			}
 			sections = append(sections, style.Render(line))
 		}
@@ -365,14 +449,31 @@ func (fd *FavoritesDialog) renderEdit() string {
 	instrStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#a6adc8")).
 		Padding(0, 1)
-	sections = append(sections, instrStyle.Render("Tab: Next field  Enter: Save  Esc: Cancel"))
+	sections = append(sections, instrStyle.Render("Tab/Shift+Tab: Navigate fields  Enter: Save  Esc: Cancel"))
+
+	// Validation error
+	if fd.validationError != "" {
+		errorStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#f38ba8")).
+			Background(lipgloss.Color("#45475a")).
+			Padding(0, 1).
+			Bold(true)
+		sections = append(sections, errorStyle.Render("⚠ "+fd.validationError))
+	}
 
 	// Fields
 	sections = append(sections, "")
-	sections = append(sections, fd.renderField("Name:", fd.nameInput, fd.currentField == 0))
+	sections = append(sections, fd.renderField("Name: (required)", fd.nameInput, fd.currentField == 0))
 	sections = append(sections, fd.renderField("Description:", fd.descriptionInput, fd.currentField == 1))
-	sections = append(sections, fd.renderField("Query:", fd.queryInput, fd.currentField == 2))
-	sections = append(sections, fd.renderField("Tags (comma separated):", fd.tagsInput, fd.currentField == 3))
+	sections = append(sections, fd.renderField("Query: (required)", fd.queryInput, fd.currentField == 2))
+	sections = append(sections, fd.renderField("Tags: (comma separated, optional)", fd.tagsInput, fd.currentField == 3))
+
+	// Help text
+	helpStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#6c7086")).
+		Padding(1, 1)
+	helpMsg := "Press Tab to move between fields.\nPress Enter on the last field to save."
+	sections = append(sections, helpStyle.Render(helpMsg))
 
 	// Container
 	containerStyle := lipgloss.NewStyle().

@@ -269,35 +269,35 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case commands.ExportFavoritesCSVMsg:
 		// Export favorites to CSV
 		if a.favoritesManager == nil {
-			a.ShowError("Export Failed", "Favorites manager not initialized")
+			a.ShowError("Export Not Available", "Favorites manager is not initialized.\n\nPlease restart the application.")
 			return a, nil
 		}
 
 		path, err := a.favoritesManager.ExportToCSV()
 		if err != nil {
-			a.ShowError("Export Failed", fmt.Sprintf("Failed to export favorites to CSV:\n\n%v", err))
+			a.ShowError("Export Failed", fmt.Sprintf("Failed to export favorites to CSV:\n\n%v\n\nPlease check that you have write permissions and try again.", err))
 			return a, nil
 		}
 
 		// Show success notification
-		a.ShowError("✓ Export Complete", fmt.Sprintf("Favorites exported to:\n\n%s", path))
+		a.ShowError("Export Complete", fmt.Sprintf("Successfully exported favorites to:\n\n%s\n\nYou can now import this file or share it with others.", path))
 		return a, nil
 
 	case commands.ExportFavoritesJSONMsg:
 		// Export favorites to JSON
 		if a.favoritesManager == nil {
-			a.ShowError("Export Failed", "Favorites manager not initialized")
+			a.ShowError("Export Not Available", "Favorites manager is not initialized.\n\nPlease restart the application.")
 			return a, nil
 		}
 
 		path, err := a.favoritesManager.ExportToJSON()
 		if err != nil {
-			a.ShowError("Export Failed", fmt.Sprintf("Failed to export favorites to JSON:\n\n%v", err))
+			a.ShowError("Export Failed", fmt.Sprintf("Failed to export favorites to JSON:\n\n%v\n\nPlease check that you have write permissions and try again.", err))
 			return a, nil
 		}
 
 		// Show success notification
-		a.ShowError("✓ Export Complete", fmt.Sprintf("Favorites exported to:\n\n%s", path))
+		a.ShowError("Export Complete", fmt.Sprintf("Successfully exported favorites to:\n\n%s\n\nYou can now import this file or share it with others.", path))
 		return a, nil
 
 	case components.ExecuteQueryMsg:
@@ -391,13 +391,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case components.ExecuteFavoriteMsg:
 		// Execute favorite query
 		if a.state.ActiveConnection == nil {
-			a.ShowError("No Connection", "Please connect to a database first")
+			a.ShowError("No Database Connection", "Please connect to a database before executing queries.\n\nPress 'c' to open the connection dialog.")
 			return a, nil
 		}
 
 		// Record usage
 		if a.favoritesManager != nil {
-			_ = a.favoritesManager.RecordUsage(msg.Favorite.ID)
+			if err := a.favoritesManager.RecordUsage(msg.Favorite.ID); err != nil {
+				// Log error but don't block execution
+				log.Printf("Warning: Failed to record favorite usage: %v", err)
+			}
 		}
 
 		// Execute query asynchronously
@@ -408,7 +411,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return QueryResultMsg{
 					SQL: msg.Favorite.Query,
 					Result: models.QueryResult{
-						Error: fmt.Errorf("failed to get connection: %w", err),
+						Error: fmt.Errorf("connection error: %w", err),
 					},
 				}
 			}
@@ -433,11 +436,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			db := a.state.CurrentDatabase
 			_, err := a.favoritesManager.Add(msg.Name, msg.Description, msg.Query, conn, db, msg.Tags)
 			if err != nil {
-				a.ShowError("Add Favorite Failed", err.Error())
+				a.ShowError("Cannot Add Favorite", fmt.Sprintf("Failed to add favorite:\n\n%v\n\nPlease check your input and try again.", err))
 			} else {
 				// Refresh the dialog
 				a.favoritesDialog.SetFavorites(a.favoritesManager.GetAll())
 			}
+		} else {
+			a.ShowError("Favorites Not Available", "Favorites manager is not initialized.\n\nPlease restart the application.")
 		}
 		return a, nil
 
@@ -445,11 +450,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.favoritesManager != nil {
 			err := a.favoritesManager.Update(msg.FavoriteID, msg.Name, msg.Description, msg.Query, msg.Tags)
 			if err != nil {
-				a.ShowError("Edit Favorite Failed", err.Error())
+				a.ShowError("Cannot Update Favorite", fmt.Sprintf("Failed to update favorite:\n\n%v\n\nPlease check your input and try again.", err))
 			} else {
 				// Refresh the dialog
 				a.favoritesDialog.SetFavorites(a.favoritesManager.GetAll())
 			}
+		} else {
+			a.ShowError("Favorites Not Available", "Favorites manager is not initialized.\n\nPlease restart the application.")
 		}
 		return a, nil
 
@@ -457,11 +464,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.favoritesManager != nil {
 			err := a.favoritesManager.Delete(msg.FavoriteID)
 			if err != nil {
-				a.ShowError("Delete Favorite Failed", err.Error())
+				a.ShowError("Cannot Delete Favorite", fmt.Sprintf("Failed to delete favorite:\n\n%v\n\nThe favorite may have already been deleted.", err))
 			} else {
 				// Refresh the dialog
 				a.favoritesDialog.SetFavorites(a.favoritesManager.GetAll())
+				// Adjust selection if needed
+				if a.favoritesDialog != nil {
+					favorites := a.favoritesManager.GetAll()
+					if len(favorites) > 0 {
+						// Keep selection valid
+						a.favoritesDialog.SetFavorites(favorites)
+					}
+				}
 			}
+		} else {
+			a.ShowError("Favorites Not Available", "Favorites manager is not initialized.\n\nPlease restart the application.")
 		}
 		return a, nil
 
