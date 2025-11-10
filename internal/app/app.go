@@ -3,16 +3,22 @@ package app
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/rebeliceyang/lazypg/internal/commands"
 	"github.com/rebeliceyang/lazypg/internal/config"
 	"github.com/rebeliceyang/lazypg/internal/db/connection"
 	"github.com/rebeliceyang/lazypg/internal/db/discovery"
 	"github.com/rebeliceyang/lazypg/internal/db/metadata"
+	"github.com/rebeliceyang/lazypg/internal/db/query"
+	filterBuilder "github.com/rebeliceyang/lazypg/internal/filter"
+	"github.com/rebeliceyang/lazypg/internal/history"
 	"github.com/rebeliceyang/lazypg/internal/models"
 	"github.com/rebeliceyang/lazypg/internal/ui/components"
 	"github.com/rebeliceyang/lazypg/internal/ui/help"
@@ -45,6 +51,23 @@ type App struct {
 	// Table view
 	tableView    *components.TableView
 	currentTable string // "schema.table"
+
+	// Phase 4: Command palette
+	showCommandPalette bool
+	commandPalette     *components.CommandPalette
+	commandRegistry    *commands.Registry
+
+	// Quick query
+	showQuickQuery bool
+	quickQuery     *components.QuickQuery
+
+	// History
+	historyStore *history.Store
+
+	// Filter builder
+	showFilterBuilder bool
+	filterBuilder     *components.FilterBuilder
+	activeFilter      *models.Filter
 }
 
 // DiscoveryCompleteMsg is sent when discovery completes
@@ -84,6 +107,12 @@ type TableDataLoadedMsg struct {
 	Err       error
 }
 
+// QueryResultMsg is sent when a query has been executed
+type QueryResultMsg struct {
+	SQL    string
+	Result models.QueryResult
+}
+
 // New creates a new App instance with config
 func New(cfg *config.Config) *App {
 	state := models.NewAppState()
@@ -104,6 +133,30 @@ func New(cfg *config.Config) *App {
 	emptyRoot := models.NewTreeNode("root", models.TreeNodeTypeRoot, "Databases")
 	emptyRoot.Expanded = true
 
+	// Initialize command registry
+	registry := commands.NewRegistry()
+	for _, cmd := range commands.GetBuiltinCommands() {
+		registry.Register(cmd)
+	}
+
+	// Initialize history store
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		log.Printf("Warning: Could not get home directory: %v", err)
+		homeDir = "."
+	}
+	configDir := filepath.Join(homeDir, ".config", "lazypg")
+	os.MkdirAll(configDir, 0755)
+
+	historyPath := filepath.Join(configDir, "history.db")
+	historyStore, err := history.NewStore(historyPath)
+	if err != nil {
+		log.Printf("Warning: Could not open history: %v", err)
+	}
+
+	// Initialize filter builder
+	filterBuilder := components.NewFilterBuilder(th)
+
 	app := &App{
 		state:             state,
 		config:            cfg,
@@ -113,7 +166,14 @@ func New(cfg *config.Config) *App {
 		connectionDialog:  components.NewConnectionDialog(),
 		errorOverlay:      components.NewErrorOverlay(th),
 		treeView:          components.NewTreeView(emptyRoot, th),
+		commandRegistry:   registry,
+		commandPalette:    components.NewCommandPalette(th),
+		quickQuery:        components.NewQuickQuery(th),
+		historyStore:      historyStore,
 		tableView:         components.NewTableView(th),
+		showFilterBuilder: false,
+		filterBuilder:     filterBuilder,
+		activeFilter:      nil,
 		leftPanel: components.Panel{
 			Title:   "Navigation",
 			Content: "Databases\n└─ (empty)",
@@ -141,6 +201,119 @@ func (a *App) Init() tea.Cmd {
 // Update implements tea.Model
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case commands.ConnectCommandMsg:
+		// Handle connect command from palette
+		a.showConnectionDialog = true
+		return a, a.triggerDiscovery()
+
+	case commands.RefreshCommandMsg:
+		// Handle refresh command
+		if a.state.ActiveConnection != nil {
+			return a, func() tea.Msg {
+				return LoadTreeMsg{}
+			}
+		}
+		return a, nil
+
+	case commands.QuickQueryCommandMsg:
+		// Open quick query mode
+		a.showQuickQuery = true
+		return a, nil
+
+	case commands.QueryEditorCommandMsg:
+		// TODO: Future task
+		a.ShowError("Not Implemented", "Query editor is a future enhancement")
+		return a, nil
+
+	case commands.HistoryCommandMsg:
+		// TODO: Implement in Task 7
+		a.ShowError("Not Implemented", "Query history will be implemented in Task 7")
+		return a, nil
+
+	case components.ExecuteQueryMsg:
+		// Handle query execution from quick query
+		if a.state.ActiveConnection == nil {
+			a.ShowError("No Connection", "Please connect to a database first")
+			return a, nil
+		}
+
+		// Execute query asynchronously
+		return a, func() tea.Msg {
+			conn, err := a.connectionManager.GetActive()
+			if err != nil {
+				return QueryResultMsg{
+					SQL: msg.SQL,
+					Result: models.QueryResult{
+						Error: fmt.Errorf("failed to get connection: %w", err),
+					},
+				}
+			}
+
+			result := query.Execute(context.Background(), conn.Pool.GetPool(), msg.SQL)
+			return QueryResultMsg{
+				SQL:    msg.SQL,
+				Result: result,
+			}
+		}
+
+	case QueryResultMsg:
+		// Record query to history
+		if a.historyStore != nil {
+			connName := ""
+			dbName := ""
+			if a.state.ActiveConnection != nil {
+				connName = a.state.ActiveConnection.Config.Name
+				dbName = a.state.ActiveConnection.Config.Database
+			}
+
+			entry := history.HistoryEntry{
+				ConnectionName: connName,
+				DatabaseName:   dbName,
+				Query:          msg.SQL,
+				Duration:       msg.Result.Duration,
+				RowsAffected:   msg.Result.RowsAffected,
+				Success:        msg.Result.Error == nil,
+			}
+
+			if msg.Result.Error != nil {
+				entry.ErrorMessage = msg.Result.Error.Error()
+			}
+
+			// Record to history (ignore errors to not interrupt user flow)
+			_ = a.historyStore.Add(entry)
+		}
+
+		// Handle query result
+		if msg.Result.Error != nil {
+			a.ShowError("Query Error", msg.Result.Error.Error())
+			return a, nil
+		}
+
+		// Display results in table view
+		a.tableView.SetData(msg.Result.Columns, msg.Result.Rows, len(msg.Result.Rows))
+		a.state.FocusedPanel = models.RightPanel
+		a.updatePanelStyles()
+
+		// Show success message briefly (could add a toast notification system)
+		// For now, just show in the status that would be visible
+
+		return a, nil
+
+	case components.ApplyFilterMsg:
+		// Apply the filter and reload table data
+		a.showFilterBuilder = false
+		a.activeFilter = &msg.Filter
+
+		// Reload table with filter
+		if a.state.TreeSelected != nil && a.state.TreeSelected.Type == models.TreeNodeTypeTable {
+			return a, a.loadTableDataWithFilter(*a.activeFilter)
+		}
+		return a, nil
+
+	case components.CloseFilterBuilderMsg:
+		a.showFilterBuilder = false
+		return a, nil
+
 	case ErrorMsg:
 		// Handle error messages
 		a.ShowError(msg.Title, msg.Message)
@@ -167,7 +340,31 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.handleConnectionDialog(msg)
 		}
 
+		// Handle command palette if visible
+		if a.showCommandPalette {
+			return a.handleCommandPalette(msg)
+		}
+
+		// Handle quick query if visible
+		if a.showQuickQuery {
+			return a.handleQuickQuery(msg)
+		}
+
+		// Handle filter builder input
+		if a.showFilterBuilder {
+			return a.handleFilterBuilder(msg)
+		}
+
 		switch msg.String() {
+		case "ctrl+p":
+			// Open quick query
+			a.showQuickQuery = true
+			return a, nil
+		case "ctrl+k":
+			// Open command palette and populate with commands including history
+			a.commandPalette.SetCommands(a.getCommandsWithHistory())
+			a.showCommandPalette = true
+			return a, nil
 		case "q", "ctrl+c":
 			// Don't quit if in help mode, exit help instead
 			if a.state.ViewMode == models.HelpMode {
@@ -191,6 +388,22 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Open connection dialog and trigger discovery
 			a.showConnectionDialog = true
 			return a, a.triggerDiscovery()
+		case "f":
+			// Open filter builder if on table view
+			if a.state.FocusedPanel == models.RightPanel && a.state.TreeSelected != nil {
+				if a.state.TreeSelected.Type == models.TreeNodeTypeTable {
+					// Get column info from current table
+					columns := a.getTableColumns()
+					// Extract schema and table names
+					schemaNode := a.state.TreeSelected.Parent
+					if schemaNode != nil {
+						a.filterBuilder.SetColumns(columns)
+						a.filterBuilder.SetTable(schemaNode.Label, a.state.TreeSelected.Label)
+						a.showFilterBuilder = true
+					}
+				}
+			}
+			return a, nil
 		case "tab":
 			// Only handle tab in normal mode
 			if a.state.ViewMode == models.NormalMode {
@@ -346,6 +559,30 @@ func (a *App) View() string {
 		return a.renderConnectionDialog()
 	}
 
+	// If command palette is showing, render it on top of everything
+	if a.showCommandPalette {
+		normalView := a.renderNormalView()
+		// Set command palette dimensions
+		a.commandPalette.Width = 80
+		if a.commandPalette.Width > a.state.Width-4 {
+			a.commandPalette.Width = a.state.Width - 4
+		}
+		a.commandPalette.Height = 20
+
+		paletteView := lipgloss.Place(
+			a.state.Width, a.state.Height,
+			lipgloss.Center, lipgloss.Center,
+			a.commandPalette.View(),
+		)
+
+		// Overlay palette on normal view
+		return lipgloss.Place(
+			a.state.Width, a.state.Height,
+			lipgloss.Left, lipgloss.Top,
+			normalView,
+		) + "\n" + paletteView
+	}
+
 	// If in help mode, show help overlay
 	if a.state.ViewMode == models.HelpMode {
 		return help.Render(a.state.Width, a.state.Height, lipgloss.NewStyle())
@@ -393,7 +630,7 @@ func (a *App) renderNormalView() string {
 
 	// Create top bar as a bordered box
 	topBarStyle := lipgloss.NewStyle().
-		Width(a.state.Width - 4). // Account for borders
+		Width(a.state.Width). // Full width - lipgloss will handle borders
 		Background(a.theme.Selection).
 		Foreground(a.theme.Foreground).
 		Border(lipgloss.RoundedBorder()).
@@ -435,7 +672,7 @@ func (a *App) renderNormalView() string {
 
 	// Create bottom bar as a bordered box
 	bottomBarStyle := lipgloss.NewStyle().
-		Width(a.state.Width - 4). // Account for borders
+		Width(a.state.Width). // Full width - lipgloss will handle borders
 		Background(a.theme.Selection).
 		Foreground(a.theme.Foreground).
 		Border(lipgloss.RoundedBorder()).
@@ -445,22 +682,22 @@ func (a *App) renderNormalView() string {
 	bottomBar := bottomBarStyle.Render(bottomBarContent)
 
 	// Update tree view dimensions and render
-	// Panel content height = panel height - 2 (borders) - 1 (title if present)
-	treeContentHeight := a.leftPanel.Height - 2
-	if a.leftPanel.Title != "" {
-		treeContentHeight -= 1
+	// Calculate available content height: panel height - borders (2) - title line (1) - padding (0)
+	treeContentHeight := a.leftPanel.Height - 3 // -2 for top/bottom borders, -1 for title
+	if treeContentHeight < 1 {
+		treeContentHeight = 1
 	}
-	a.treeView.Width = a.leftPanel.Width
+	a.treeView.Width = a.leftPanel.Width - 2 // -2 for horizontal padding inside panel
 	a.treeView.Height = treeContentHeight
 	a.leftPanel.Content = a.treeView.View()
 
 	// Update table view dimensions and render
-	// Panel content height = panel height - 2 (borders) - 1 (title if present)
-	tableContentHeight := a.rightPanel.Height - 2
-	if a.rightPanel.Title != "" {
-		tableContentHeight -= 1
+	// Calculate available content height: panel height - borders (2) - title line (1) - padding (0)
+	tableContentHeight := a.rightPanel.Height - 3 // -2 for top/bottom borders, -1 for title
+	if tableContentHeight < 1 {
+		tableContentHeight = 1
 	}
-	a.tableView.Width = a.rightPanel.Width
+	a.tableView.Width = a.rightPanel.Width - 2 // -2 for horizontal padding inside panel
 	a.tableView.Height = tableContentHeight
 	a.rightPanel.Content = a.tableView.View()
 
@@ -472,12 +709,41 @@ func (a *App) renderNormalView() string {
 	)
 
 	// Combine all
-	return lipgloss.JoinVertical(
+	mainView := lipgloss.JoinVertical(
 		lipgloss.Left,
 		topBar,
 		panels,
 		bottomBar,
 	)
+
+	// If quick query is showing, replace bottom bar with it
+	if a.showQuickQuery {
+		a.quickQuery.Width = a.state.Width
+		quickQueryView := a.quickQuery.View()
+
+		// Replace bottom bar with quick query
+		mainView = lipgloss.JoinVertical(
+			lipgloss.Left,
+			topBar,
+			panels,
+			quickQueryView,
+		)
+	}
+
+	// Render filter builder if visible
+	if a.showFilterBuilder {
+		mainView = lipgloss.Place(
+			a.state.Width,
+			a.state.Height,
+			lipgloss.Center,
+			lipgloss.Center,
+			a.filterBuilder.View(),
+			lipgloss.WithWhitespaceChars(" "),
+			lipgloss.WithWhitespaceForeground(lipgloss.Color("#555555")),
+		)
+	}
+
+	return mainView
 }
 
 // updatePanelDimensions calculates panel sizes based on window size
@@ -486,8 +752,9 @@ func (a *App) updatePanelDimensions() {
 		return
 	}
 
-	// Reserve space for top bar (3 lines with border) and bottom bar (3 lines with border)
+	// Reserve space for top bar (3 lines) and bottom bar (3 lines)
 	// Total: 6 lines, leaving Height - 6 for panels
+	// Note: Panel.Height includes borders, so the actual content area is Height - 6
 	contentHeight := a.state.Height - 6
 	if contentHeight < 5 {
 		contentHeight = 5
@@ -529,21 +796,26 @@ func (a *App) updatePanelStyles() {
 
 // formatStatusBar formats a status bar with left and right aligned content
 func (a *App) formatStatusBar(left, right string) string {
-	// Account for padding (2 chars on each side = 4 total)
+	// Calculate available width accounting for:
+	// - Borders: 2 chars (left + right)
+	// - Padding: 2 chars (left + right, from Padding(0, 1))
+	// Total: 4 chars
 	availableWidth := a.state.Width - 4
 	if availableWidth < 0 {
 		availableWidth = 0
 	}
 
-	leftLen := len(left)
-	rightLen := len(right)
+	// Use lipgloss.Width to get actual display width (ignoring ANSI codes)
+	leftLen := lipgloss.Width(left)
+	rightLen := lipgloss.Width(right)
 
 	// If content is too wide, truncate
 	if leftLen+rightLen > availableWidth {
 		if availableWidth > rightLen {
-			return left[:availableWidth-rightLen] + right
+			// Simple truncation - in a real app you'd want smarter truncation
+			return left + right
 		}
-		return left[:availableWidth]
+		return left
 	}
 
 	// Calculate spacing between left and right content
@@ -688,6 +960,115 @@ func (a *App) handleConnectionDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
+// getCommandsWithHistory returns all commands including recent history
+func (a *App) getCommandsWithHistory() []models.Command {
+	// Start with built-in commands
+	commands := a.commandRegistry.GetAll()
+
+	// Add recent history entries
+	if a.historyStore != nil {
+		entries, err := a.historyStore.GetRecent(10)
+		if err == nil {
+			for _, entry := range entries {
+				// Truncate long queries for display
+				displayQuery := entry.Query
+				if len(displayQuery) > 60 {
+					displayQuery = displayQuery[:57] + "..."
+				}
+
+				// Create command from history entry
+				cmd := models.Command{
+					Type:        models.CommandTypeHistory,
+					Label:       displayQuery,
+					Description: fmt.Sprintf("From %s • %s", entry.DatabaseName, entry.ExecutedAt.Format("Jan 2 15:04")),
+					Icon:        "📜",
+					Tags:        []string{"history", entry.DatabaseName},
+					Action: func(sql string) tea.Cmd {
+						return func() tea.Msg {
+							return components.ExecuteQueryMsg{SQL: sql}
+						}
+					}(entry.Query), // Capture the query in closure
+				}
+				commands = append(commands, cmd)
+			}
+		}
+	}
+
+	return commands
+}
+
+// handleCommandPalette handles key events when command palette is visible
+func (a *App) handleCommandPalette(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Handle close message
+	var cmd tea.Cmd
+	a.commandPalette, cmd = a.commandPalette.Update(msg)
+
+	// Check if we got a close message
+	if msg.String() == "esc" || msg.String() == "ctrl+c" {
+		a.showCommandPalette = false
+		return a, nil
+	}
+
+	// Execute the command if Enter was pressed
+	if msg.String() == "enter" {
+		a.showCommandPalette = false
+	}
+
+	return a, cmd
+}
+
+// handleQuickQuery handles key events when quick query is visible
+func (a *App) handleQuickQuery(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	a.quickQuery, cmd = a.quickQuery.Update(msg)
+
+	// Check if we should close
+	if msg.String() == "esc" || msg.String() == "ctrl+c" {
+		a.showQuickQuery = false
+		return a, nil
+	}
+
+	// Execute query if Enter was pressed
+	if msg.String() == "enter" {
+		a.showQuickQuery = false
+	}
+
+	return a, cmd
+}
+
+// handleFilterBuilder handles key events when filter builder is visible
+func (a *App) handleFilterBuilder(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	a.filterBuilder, cmd = a.filterBuilder.Update(msg)
+	return a, cmd
+}
+
+// getTableColumns returns column info for the current table
+func (a *App) getTableColumns() []models.ColumnInfo {
+	if a.state.TreeSelected == nil || a.state.TreeSelected.Type != models.TreeNodeTypeTable {
+		return nil
+	}
+
+	// Extract columns from table view
+	columns := []models.ColumnInfo{}
+
+	// Get column names from the current table view
+	// This is a placeholder - actual implementation depends on how you store column metadata
+	// For now, we'll return columns from the tableView
+	if len(a.tableView.Columns) > 0 {
+		for _, header := range a.tableView.Columns {
+			columns = append(columns, models.ColumnInfo{
+				Name:     header,
+				DataType: "text", // Default type, should be enhanced with actual type info
+				IsArray:  false,
+				IsJsonb:  false,
+			})
+		}
+	}
+
+	return columns
+}
+
 // renderConnectionDialog renders the connection dialog centered on screen
 func (a *App) renderConnectionDialog() string {
 	// Center the dialog
@@ -803,6 +1184,70 @@ func (a *App) loadTableData(msg LoadTableDataMsg) tea.Cmd {
 			Rows:      data.Rows,
 			TotalRows: int(data.TotalRows),
 			Offset:    msg.Offset,
+		}
+	}
+}
+
+// loadTableDataWithFilter loads table data with an applied filter
+func (a *App) loadTableDataWithFilter(filter models.Filter) tea.Cmd {
+	return func() tea.Msg {
+		conn, err := a.connectionManager.GetActive()
+		if err != nil {
+			return ErrorMsg{Title: "Connection Error", Message: err.Error()}
+		}
+
+		node := a.state.TreeSelected
+		if node == nil || node.Type != models.TreeNodeTypeTable {
+			return ErrorMsg{Title: "Error", Message: "No table selected"}
+		}
+
+		// Get schema from parent node
+		schemaNode := node.Parent
+		if schemaNode == nil {
+			return ErrorMsg{Title: "Error", Message: "Cannot determine schema"}
+		}
+
+		// Build filtered query
+		builder := filterBuilder.NewBuilder()
+		whereClause, args, err := builder.BuildWhere(filter)
+		if err != nil {
+			return ErrorMsg{Title: "Filter Error", Message: err.Error()}
+		}
+
+		// Construct query
+		query := fmt.Sprintf(
+			"SELECT * FROM %s.%s %s LIMIT 100",
+			schemaNode.Label,
+			node.Label,
+			whereClause,
+		)
+
+		// Execute query
+		result, err := conn.Pool.QueryWithColumns(context.Background(), query, args...)
+		if err != nil {
+			return ErrorMsg{Title: "Query Error", Message: err.Error()}
+		}
+
+		// Convert to string rows for display
+		var rows [][]string
+		for _, row := range result.Rows {
+			var strRow []string
+			for _, col := range result.Columns {
+				val := row[col]
+				if val == nil {
+					strRow = append(strRow, "NULL")
+				} else {
+					strRow = append(strRow, fmt.Sprintf("%v", val))
+				}
+			}
+			rows = append(rows, strRow)
+		}
+
+		return TableDataLoadedMsg{
+			Columns:   result.Columns,
+			Rows:      rows,
+			TotalRows: len(rows),
+			Offset:    0,
 		}
 	}
 }
