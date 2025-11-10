@@ -67,7 +67,8 @@ func (b *Builder) buildGroup(group models.FilterGroup, paramIndex int) (string, 
 
 // buildCondition builds a single filter condition
 func (b *Builder) buildCondition(cond models.FilterCondition, paramIndex int) (string, []interface{}, error) {
-	column := cond.Column
+	// Escape column name to prevent SQL injection and handle reserved keywords
+	column := fmt.Sprintf(`"%s"`, cond.Column)
 
 	switch cond.Operator {
 	case models.OpIsNull:
@@ -80,8 +81,9 @@ func (b *Builder) buildCondition(cond models.FilterCondition, paramIndex int) (s
 	case models.OpLike, models.OpILike:
 		return fmt.Sprintf("%s %s $%d", column, cond.Operator, paramIndex), []interface{}{cond.Value}, nil
 	case models.OpIn, models.OpNotIn:
-		// For IN/NOT IN, value should be a slice
-		return fmt.Sprintf("%s %s ($%d)", column, cond.Operator, paramIndex), []interface{}{cond.Value}, nil
+		// TODO: Properly implement IN/NOT IN with array expansion
+		// Current implementation is invalid SQL and needs proper handling
+		return "", nil, fmt.Errorf("IN/NOT IN operators not yet implemented")
 	case models.OpContains, models.OpContainedBy, models.OpHasKey:
 		// JSONB operators
 		return fmt.Sprintf("%s %s $%d", column, cond.Operator, paramIndex), []interface{}{cond.Value}, nil
@@ -94,6 +96,9 @@ func (b *Builder) buildCondition(cond models.FilterCondition, paramIndex int) (s
 
 // GetOperatorsForType returns available operators for a given PostgreSQL type
 func GetOperatorsForType(dataType string) []models.FilterOperator {
+	// Normalize to lowercase for case-insensitive matching
+	dataType = strings.ToLower(dataType)
+
 	switch {
 	case strings.Contains(dataType, "int") || strings.Contains(dataType, "numeric") ||
 		strings.Contains(dataType, "real") || strings.Contains(dataType, "double"):
@@ -115,7 +120,7 @@ func GetOperatorsForType(dataType string) []models.FilterOperator {
 			models.OpContains, models.OpContainedBy, models.OpHasKey,
 			models.OpIsNull, models.OpIsNotNull,
 		}
-	case strings.Contains(dataType, "ARRAY"):
+	case strings.Contains(dataType, "array"):
 		return []models.FilterOperator{
 			models.OpEqual, models.OpNotEqual,
 			models.OpArrayOverlap, models.OpContains, models.OpContainedBy,
