@@ -239,6 +239,8 @@ type ColumnInfo struct {
 	Nullable   bool
 	PrimaryKey bool
 	Default    *string
+	IsArray    bool
+	IsJsonb    bool
 }
 
 // BuildColumnNodes creates column nodes for a table
