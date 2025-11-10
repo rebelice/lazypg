@@ -60,6 +60,12 @@ func (p *Pool) Ping(ctx context.Context) error {
 	return p.pool.Ping(ctx)
 }
 
+// QueryResult represents a query result with columns and rows
+type QueryResult struct {
+	Columns []string
+	Rows    []map[string]interface{}
+}
+
 // Query executes a query
 func (p *Pool) Query(ctx context.Context, sql string, args ...interface{}) ([]map[string]interface{}, error) {
 	rows, err := p.pool.Query(ctx, sql, args...)
@@ -85,6 +91,42 @@ func (p *Pool) Query(ctx context.Context, sql string, args ...interface{}) ([]ma
 	}
 
 	return results, rows.Err()
+}
+
+// QueryWithColumns executes a query and returns column names in order
+func (p *Pool) QueryWithColumns(ctx context.Context, sql string, args ...interface{}) (*QueryResult, error) {
+	rows, err := p.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	fieldDescriptions := rows.FieldDescriptions()
+
+	// Extract column names in order
+	columns := make([]string, len(fieldDescriptions))
+	for i, fd := range fieldDescriptions {
+		columns[i] = string(fd.Name)
+	}
+
+	var results []map[string]interface{}
+	for rows.Next() {
+		values, err := rows.Values()
+		if err != nil {
+			return nil, err
+		}
+
+		row := make(map[string]interface{})
+		for i, fd := range fieldDescriptions {
+			row[string(fd.Name)] = values[i]
+		}
+		results = append(results, row)
+	}
+
+	return &QueryResult{
+		Columns: columns,
+		Rows:    results,
+	}, rows.Err()
 }
 
 // QueryRow executes a query that returns a single row
