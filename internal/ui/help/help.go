@@ -50,8 +50,9 @@ func GetNavigationKeys() []KeyBinding {
 // GetDataViewKeys returns data view key bindings
 func GetDataViewKeys() []KeyBinding {
 	return []KeyBinding{
-		{"f, /", "Add filter"},
-		{"Shift+F", "Exclude filter"},
+		{"f", "Open filter builder"},
+		{"Ctrl+F", "Quick filter from cell"},
+		{"Ctrl+R", "Clear filter"},
 		{"c", "Copy cell"},
 		{"Shift+C", "Copy row"},
 		{"e", "Edit cell"},

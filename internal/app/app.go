@@ -445,6 +445,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return a, nil
+		case "ctrl+r":
+			// Clear filter and reload
+			if a.activeFilter != nil && a.state.TreeSelected != nil {
+				a.activeFilter = nil
+				schemaNode := a.state.TreeSelected.Parent
+				if schemaNode != nil {
+					return a, a.loadTableData(LoadTableDataMsg{
+						Schema: schemaNode.Label,
+						Table:  a.state.TreeSelected.Label,
+						Limit:  100,
+						Offset: 0,
+					})
+				}
+			}
+			return a, nil
 		case "tab":
 			// Only handle tab in normal mode
 			if a.state.ViewMode == models.NormalMode {
@@ -700,6 +715,19 @@ func (a *App) renderNormalView() string {
 		bottomBarLeft = keyStyle.Render("↑↓") + dimStyle.Render(" navigate") +
 			dimStyle.Render(" │ ") +
 			keyStyle.Render("Ctrl+D/U") + dimStyle.Render(" page")
+	}
+
+	// Add filter indicator if active
+	if a.activeFilter != nil && len(a.activeFilter.RootGroup.Conditions) > 0 {
+		keyStyle := lipgloss.NewStyle().Foreground(a.theme.BorderFocused)
+		dimStyle := lipgloss.NewStyle().Foreground(a.theme.Metadata)
+		filterCount := len(a.activeFilter.RootGroup.Conditions)
+		filterSuffix := ""
+		if filterCount > 1 {
+			filterSuffix = "s"
+		}
+		filterIndicator := keyStyle.Render("🔍") + dimStyle.Render(fmt.Sprintf(" %d filter%s active", filterCount, filterSuffix))
+		bottomBarLeft = bottomBarLeft + dimStyle.Render(" │ ") + filterIndicator
 	}
 
 	// Common keys on the right
