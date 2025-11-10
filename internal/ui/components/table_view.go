@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/rebeliceyang/lazypg/internal/jsonb"
 	"github.com/rebeliceyang/lazypg/internal/ui/theme"
 )
 
@@ -158,7 +159,16 @@ func (tv *TableView) renderRow(row []string, selected bool) string {
 			break
 		}
 		width := tv.ColumnWidths[i]
-		parts = append(parts, tv.pad(cell, width))
+
+		// Check if this looks like JSONB and format for display
+		cellValue := cell
+		if jsonb.IsJSONB(cellValue) {
+			cellValue = jsonb.Truncate(cellValue, 50)
+			// Add indicator that it's JSONB
+			cellValue = "📦 " + cellValue
+		}
+
+		parts = append(parts, tv.pad(cellValue, width))
 	}
 
 	line := " " + strings.Join(parts, " │ ") + " "
