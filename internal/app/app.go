@@ -1289,7 +1289,7 @@ func (a *App) loadTableDataWithFilter(filter models.Filter) tea.Cmd {
 
 		// Construct query
 		query := fmt.Sprintf(
-			"SELECT * FROM %s.%s %s LIMIT 100",
+			`SELECT * FROM "%s"."%s" %s LIMIT 100`,
 			schemaNode.Label,
 			node.Label,
 			whereClause,
