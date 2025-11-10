@@ -43,5 +43,18 @@ func DefaultTheme() Theme {
 		JSONNumber:  lipgloss.Color("150"),
 		JSONBoolean: lipgloss.Color("75"),
 		JSONNull:    lipgloss.Color("244"),
+
+		// Tree/Navigator colors
+		DatabaseActive:   lipgloss.Color("42"),  // Green
+		DatabaseInactive: lipgloss.Color("240"), // Gray
+		SchemaExpanded:   lipgloss.Color("75"),  // Blue
+		SchemaCollapsed:  lipgloss.Color("240"), // Gray
+		TableIcon:        lipgloss.Color("141"), // Purple
+		ViewIcon:         lipgloss.Color("80"),  // Teal
+		FunctionIcon:     lipgloss.Color("220"), // Yellow
+		ColumnIcon:       lipgloss.Color("250"), // Light gray
+		Metadata:         lipgloss.Color("240"), // Gray
+		PrimaryKey:       lipgloss.Color("220"), // Yellow
+		ForeignKey:       lipgloss.Color("75"),  // Blue
 	}
 }

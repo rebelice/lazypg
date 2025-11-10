@@ -267,69 +267,106 @@ func (tv *TreeView) renderNode(node *models.TreeNode, selected bool) string {
 	return style.Render(content)
 }
 
-// getNodeIcon returns the appropriate icon for a node
+// getNodeIcon returns the appropriate icon for a node with color
 func (tv *TreeView) getNodeIcon(node *models.TreeNode) string {
-	if node.Type == models.TreeNodeTypeColumn {
-		// Columns are leaf nodes
-		return "•"
+	var icon string
+	var iconColor lipgloss.Color
+
+	switch node.Type {
+	case models.TreeNodeTypeDatabase:
+		// Check if database is active
+		isActive := false
+		if meta, ok := node.Metadata.(map[string]interface{}); ok {
+			if active, ok := meta["active"].(bool); ok && active {
+				isActive = true
+			}
+		}
+		if isActive {
+			icon = "●"
+			iconColor = tv.Theme.DatabaseActive
+		} else {
+			icon = "○"
+			iconColor = tv.Theme.DatabaseInactive
+		}
+
+	case models.TreeNodeTypeSchema:
+		if node.Expanded {
+			icon = "▾"
+			iconColor = tv.Theme.SchemaExpanded
+		} else {
+			icon = "▸"
+			iconColor = tv.Theme.SchemaCollapsed
+		}
+
+	case models.TreeNodeTypeTable:
+		icon = "▦"
+		iconColor = tv.Theme.TableIcon
+
+	case models.TreeNodeTypeColumn:
+		icon = "•"
+		iconColor = tv.Theme.ColumnIcon
+
+	default:
+		// Generic expandable/collapsible
+		if node.Expanded {
+			icon = "▾"
+			iconColor = tv.Theme.Foreground
+		} else {
+			icon = "▸"
+			iconColor = tv.Theme.Foreground
+		}
 	}
 
-	if node.Expanded {
-		// Expanded node
-		return "▾"
-	}
-
-	// Collapsed node (or not yet loaded)
-	if len(node.Children) > 0 || !node.Loaded {
-		return "▸"
-	}
-
-	// Empty non-leaf node
-	return "▸"
+	// Apply color and return
+	return lipgloss.NewStyle().Foreground(iconColor).Render(icon)
 }
 
 // buildNodeLabel builds the display label for a node, including metadata
 func (tv *TreeView) buildNodeLabel(node *models.TreeNode) string {
 	label := node.Label
+	metaStyle := lipgloss.NewStyle().Foreground(tv.Theme.Metadata)
 
 	// Add metadata based on node type
 	switch node.Type {
 	case models.TreeNodeTypeDatabase:
-		// Check if this is the active database
-		if meta, ok := node.Metadata.(map[string]interface{}); ok {
-			if isActive, ok := meta["active"].(bool); ok && isActive {
-				activeStyle := lipgloss.NewStyle().Foreground(tv.Theme.Success)
-				label += " " + activeStyle.Render("(active)")
-			}
-		}
+		// Active database already shown with icon color, no need for extra text
+		// Just show the database name
 
 	case models.TreeNodeTypeSchema:
 		// Show table count or "empty" for schemas
 		if node.Loaded {
 			childCount := len(node.Children)
-			dimStyle := lipgloss.NewStyle().Foreground(tv.Theme.Comment)
 			if childCount == 0 {
-				label += " " + dimStyle.Render("(empty)")
+				label += " " + metaStyle.Render("∅")
 			} else {
-				label += " " + dimStyle.Render(fmt.Sprintf("(%d)", childCount))
+				label += " " + metaStyle.Render(fmt.Sprintf("(%d)", childCount))
 			}
 		}
 
 	case models.TreeNodeTypeTable:
-		// Add row count if available
+		// Add row count if available with better formatting
 		if meta, ok := node.Metadata.(map[string]interface{}); ok {
 			if rowCount, ok := meta["row_count"].(int64); ok {
-				label += fmt.Sprintf(" (%s rows)", formatNumber(rowCount))
+				label += " " + metaStyle.Render(formatNumber(rowCount))
 			}
 		}
 
 	case models.TreeNodeTypeColumn:
 		// Column label already includes type from BuildColumnNodes
-		// Optionally add PK indicator
+		// Add indicators for constraints
 		if meta, ok := node.Metadata.(models.ColumnInfo); ok {
+			var indicators []string
+
 			if meta.PrimaryKey {
-				pkStyle := lipgloss.NewStyle().Foreground(tv.Theme.Warning)
-				label += " " + pkStyle.Render("PK")
+				pkStyle := lipgloss.NewStyle().Foreground(tv.Theme.PrimaryKey)
+				indicators = append(indicators, pkStyle.Render("⚿"))
+			}
+
+			// Note: ForeignKey and NotNull fields don't exist in ColumnInfo yet
+			// They can be added in future enhancement
+
+			if len(indicators) > 0 {
+				label += " " + strings.Join(indicators, " ")
 			}
 		}
 	}

@@ -113,7 +113,7 @@ func New(cfg *config.Config) *App {
 		connectionDialog:  components.NewConnectionDialog(),
 		errorOverlay:      components.NewErrorOverlay(th),
 		treeView:          components.NewTreeView(emptyRoot, th),
-		tableView:         components.NewTableView(),
+		tableView:         components.NewTableView(th),
 		leftPanel: components.Panel{
 			Title:   "Navigation",
 			Content: "Databases\n└─ (empty)",
@@ -357,51 +357,81 @@ func (a *App) View() string {
 // renderNormalView renders the normal application view
 func (a *App) renderNormalView() string {
 
-	// Modern top bar with gradient-like effect
+	// Top bar with app name and connection status
 	appNameStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("39")). // Bright blue
-		Background(lipgloss.Color("236"))
+		Foreground(a.theme.BorderFocused).
+		Background(a.theme.Selection)
 
 	connStatus := ""
 	if a.state.ActiveConnection != nil {
-		connStatus = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("76")). // Green
-			Render(" ● Connected")
+		// Build connection string
+		conn := a.state.ActiveConnection
+		connStr := fmt.Sprintf("%s@%s:%d/%s",
+			conn.Config.User,
+			conn.Config.Host,
+			conn.Config.Port,
+			conn.Config.Database)
+
+		connStatus = " " + lipgloss.NewStyle().
+			Foreground(a.theme.Success).
+			Render("●") + " " +
+			lipgloss.NewStyle().
+			Foreground(a.theme.Foreground).
+			Render(connStr)
+	} else {
+		connStatus = " " + lipgloss.NewStyle().
+			Foreground(a.theme.Metadata).
+			Render("○ Not connected")
 	}
 
-	topBarLeft := appNameStyle.Render(" 󱘖 lazypg ") + connStatus
+	topBarLeft := appNameStyle.Render(" 󱘖 LazyPG ") + connStatus
 	topBarRight := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245")).
-		Render("Press ? for help")
+		Foreground(a.theme.Metadata).
+		Render("? help")
 	topBarContent := a.formatStatusBar(topBarLeft, topBarRight)
 
 	topBar := lipgloss.NewStyle().
 		Width(a.state.Width).
-		Background(lipgloss.Color("236")).
-		Foreground(lipgloss.Color("254")).
+		Background(a.theme.Selection).
+		Foreground(a.theme.Foreground).
 		Render(topBarContent)
 
-	// Modern bottom bar with better contrast
-	bottomBarLeft := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("111")).
-		Render("󰌑 tab") + lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245")).
-		Render(" switch │ ") +
-		lipgloss.NewStyle().
-		Foreground(lipgloss.Color("111")).
-		Render("q") + lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245")).
-		Render(" quit")
+	// Context-sensitive bottom bar
+	var bottomBarLeft string
+	if a.state.FocusedPanel == models.LeftPanel {
+		// Tree navigation keys
+		keyStyle := lipgloss.NewStyle().Foreground(a.theme.BorderFocused)
+		dimStyle := lipgloss.NewStyle().Foreground(a.theme.Metadata)
 
-	bottomBarRight := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245")).
-		Render("⌘K command palette")
+		bottomBarLeft = keyStyle.Render("↑↓") + dimStyle.Render(" navigate") +
+			dimStyle.Render(" │ ") +
+			keyStyle.Render("→←") + dimStyle.Render(" expand/collapse") +
+			dimStyle.Render(" │ ") +
+			keyStyle.Render("Enter") + dimStyle.Render(" select")
+	} else {
+		// Table navigation keys
+		keyStyle := lipgloss.NewStyle().Foreground(a.theme.BorderFocused)
+		dimStyle := lipgloss.NewStyle().Foreground(a.theme.Metadata)
+
+		bottomBarLeft = keyStyle.Render("↑↓") + dimStyle.Render(" navigate") +
+			dimStyle.Render(" │ ") +
+			keyStyle.Render("Ctrl+D/U") + dimStyle.Render(" page")
+	}
+
+	// Common keys on the right
+	keyStyle := lipgloss.NewStyle().Foreground(a.theme.BorderFocused)
+	dimStyle := lipgloss.NewStyle().Foreground(a.theme.Metadata)
+	bottomBarRight := keyStyle.Render("Tab") + dimStyle.Render(" switch") +
+		dimStyle.Render(" │ ") +
+		keyStyle.Render("q") + dimStyle.Render(" quit")
+
 	bottomBarContent := a.formatStatusBar(bottomBarLeft, bottomBarRight)
 
 	bottomBar := lipgloss.NewStyle().
 		Width(a.state.Width).
-		Background(lipgloss.Color("235")).
+		Background(a.theme.Selection).
+		Foreground(a.theme.Foreground).
 		Render(bottomBarContent)
 
 	// Update tree view dimensions and render

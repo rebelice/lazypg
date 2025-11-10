@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/rebeliceyang/lazypg/internal/ui/theme"
 )
 
 // TableView displays table data with virtual scrolling
@@ -14,6 +15,7 @@ type TableView struct {
 	Width        int
 	Height       int
 	Style        lipgloss.Style
+	Theme        theme.Theme // Color theme
 
 	// Virtual scrolling state
 	TopRow       int
@@ -25,12 +27,13 @@ type TableView struct {
 	ColumnWidths []int
 }
 
-// NewTableView creates a new table view
-func NewTableView() *TableView {
+// NewTableView creates a new table view with theme
+func NewTableView(th theme.Theme) *TableView {
 	return &TableView{
 		Columns:      []string{},
 		Rows:         [][]string{},
 		ColumnWidths: []int{},
+		Theme:        th,
 	}
 }
 
@@ -124,11 +127,11 @@ func (tv *TableView) renderHeader() string {
 		width := tv.ColumnWidths[i]
 		parts = append(parts, tv.pad(col, width))
 	}
-	// Modern header style with color
+	// Modern header style using theme colors
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("105")). // Purple
-		Background(lipgloss.Color("236"))  // Dark gray background
+		Foreground(tv.Theme.TableHeader).
+		Background(tv.Theme.Selection)
 	return headerStyle.Render(" " + strings.Join(parts, " │ ") + " ")
 }
 
@@ -138,7 +141,7 @@ func (tv *TableView) renderSeparator() string {
 		parts = append(parts, strings.Repeat("─", width))
 	}
 	separatorStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")) // Gray
+		Foreground(tv.Theme.Border)
 	return separatorStyle.Render("─" + strings.Join(parts, "─┼─") + "─")
 }
 
@@ -155,14 +158,17 @@ func (tv *TableView) renderRow(row []string, selected bool) string {
 	line := " " + strings.Join(parts, " │ ") + " "
 
 	if selected {
-		// Modern selection with gradient-like effect
+		// Use theme's selection color
 		return lipgloss.NewStyle().
-			Background(lipgloss.Color("25")). // Brighter blue
-			Foreground(lipgloss.Color("15")). // White text
+			Background(tv.Theme.BorderFocused).
+			Foreground(tv.Theme.Background).
 			Bold(true).
 			Render(line)
 	}
-	return line
+	// Use theme foreground for normal rows
+	return lipgloss.NewStyle().
+		Foreground(tv.Theme.Foreground).
+		Render(line)
 }
 
 func (tv *TableView) renderStatus() string {
@@ -173,7 +179,7 @@ func (tv *TableView) renderStatus() string {
 
 	showing := fmt.Sprintf(" 󰈙 %d-%d of %d rows", tv.TopRow+1, endRow, tv.TotalRows)
 	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color("245")). // Medium gray
+		Foreground(tv.Theme.Metadata).
 		Italic(true).
 		Render(showing)
 }

@@ -42,6 +42,19 @@ type Theme struct {
 	JSONNumber  lipgloss.Color
 	JSONBoolean lipgloss.Color
 	JSONNull    lipgloss.Color
+
+	// Tree/Navigator colors
+	DatabaseActive   lipgloss.Color // Active database indicator
+	DatabaseInactive lipgloss.Color // Inactive database indicator
+	SchemaExpanded   lipgloss.Color // Expanded schema icon
+	SchemaCollapsed  lipgloss.Color // Collapsed schema icon
+	TableIcon        lipgloss.Color // Table icon color
+	ViewIcon         lipgloss.Color // View icon color
+	FunctionIcon     lipgloss.Color // Function icon color
+	ColumnIcon       lipgloss.Color // Column icon color
+	Metadata         lipgloss.Color // Metadata text (row counts, types)
+	PrimaryKey       lipgloss.Color // Primary key indicator
+	ForeignKey       lipgloss.Color // Foreign key indicator
 }
 
 // GetTheme returns a theme by name
@@ -49,7 +62,10 @@ func GetTheme(name string) Theme {
 	switch name {
 	case "default":
 		return DefaultTheme()
+	case "catppuccin-mocha", "catppuccin":
+		return CatppuccinMochaTheme()
 	default:
-		return DefaultTheme()
+		// Default to Catppuccin Mocha for better aesthetics
+		return CatppuccinMochaTheme()
 	}
 }
