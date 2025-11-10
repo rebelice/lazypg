@@ -21,14 +21,22 @@ func Format(value interface{}) (string, error) {
 		if err := json.Unmarshal([]byte(v), &parsed); err != nil {
 			return "", fmt.Errorf("invalid JSON: %w", err)
 		}
-		jsonBytes, _ = json.MarshalIndent(parsed, "", "  ")
+		var err error
+		jsonBytes, err = json.MarshalIndent(parsed, "", "  ")
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal JSON: %w", err)
+		}
 	case []byte:
 		// JSON bytes, parse and re-format
 		var parsed interface{}
 		if err := json.Unmarshal(v, &parsed); err != nil {
 			return "", fmt.Errorf("invalid JSON: %w", err)
 		}
-		jsonBytes, _ = json.MarshalIndent(parsed, "", "  ")
+		var err error
+		jsonBytes, err = json.MarshalIndent(parsed, "", "  ")
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal JSON: %w", err)
+		}
 	default:
 		// Other types, marshal directly
 		var err error
@@ -54,13 +62,21 @@ func Compact(value interface{}) (string, error) {
 		if err := json.Unmarshal([]byte(v), &parsed); err != nil {
 			return "", fmt.Errorf("invalid JSON: %w", err)
 		}
-		jsonBytes, _ = json.Marshal(parsed)
+		var err error
+		jsonBytes, err = json.Marshal(parsed)
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal JSON: %w", err)
+		}
 	case []byte:
 		var parsed interface{}
 		if err := json.Unmarshal(v, &parsed); err != nil {
 			return "", fmt.Errorf("invalid JSON: %w", err)
 		}
-		jsonBytes, _ = json.Marshal(parsed)
+		var err error
+		jsonBytes, err = json.Marshal(parsed)
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal JSON: %w", err)
+		}
 	default:
 		var err error
 		jsonBytes, err = json.Marshal(v)
