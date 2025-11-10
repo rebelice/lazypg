@@ -27,18 +27,19 @@ type FilterBuilder struct {
 	builder *filter.Builder
 
 	// State
-	columns       []models.ColumnInfo
-	filter        models.Filter
-	currentIndex  int // Index in conditions list
-	editMode      string // "", "column", "operator", "value"
-	columnInput   string
-	operatorIndex int
-	valueInput    string
+	columns         []models.ColumnInfo
+	filter          models.Filter
+	currentIndex    int    // Index in conditions list
+	editMode        string // "", "column", "operator", "value"
+	columnInput     string
+	operatorIndex   int
+	valueInput      string
+	validationError string
 
 	// UI elements
-	selectedColumn   models.ColumnInfo
-	availableOps     []models.FilterOperator
-	previewSQL       string
+	selectedColumn models.ColumnInfo
+	availableOps   []models.FilterOperator
+	previewSQL     string
 }
 
 // NewFilterBuilder creates a new filter builder
@@ -114,6 +115,11 @@ func (fb *FilterBuilder) handleNavigationMode(msg tea.KeyMsg) (*FilterBuilder, t
 		}
 	case "enter":
 		// Apply filter
+		if len(fb.filter.RootGroup.Conditions) == 0 {
+			fb.validationError = "Add at least one condition before applying filter"
+			return fb, nil
+		}
+		fb.validationError = ""
 		return fb, func() tea.Msg {
 			return ApplyFilterMsg{Filter: fb.filter}
 		}
@@ -131,6 +137,7 @@ func (fb *FilterBuilder) handleColumnMode(msg tea.KeyMsg) (*FilterBuilder, tea.C
 	case "esc":
 		fb.editMode = ""
 		fb.columnInput = ""
+		fb.validationError = ""
 	case "enter":
 		// Find matching column
 		for _, col := range fb.columns {
@@ -139,10 +146,12 @@ func (fb *FilterBuilder) handleColumnMode(msg tea.KeyMsg) (*FilterBuilder, tea.C
 				fb.availableOps = filter.GetOperatorsForType(col.DataType)
 				fb.editMode = "operator"
 				fb.operatorIndex = 0
+				fb.validationError = ""
 				return fb, nil
 			}
 		}
-		// No match, stay in column mode
+		// No match, show error and stay in column mode
+		fb.validationError = fmt.Sprintf("Column '%s' not found", fb.columnInput)
 	case "backspace":
 		if len(fb.columnInput) > 0 {
 			fb.columnInput = fb.columnInput[:len(fb.columnInput)-1]
@@ -225,9 +234,9 @@ func (fb *FilterBuilder) updatePreview() {
 		fb.previewSQL = fmt.Sprintf("Error: %s", err.Error())
 	} else {
 		if whereClause == "" {
-			fb.previewSQL = "SELECT * FROM " + fb.filter.TableName
+			fb.previewSQL = fmt.Sprintf(`SELECT * FROM "%s"."%s"`, fb.filter.Schema, fb.filter.TableName)
 		} else {
-			fb.previewSQL = fmt.Sprintf("SELECT * FROM %s %s", fb.filter.TableName, whereClause)
+			fb.previewSQL = fmt.Sprintf(`SELECT * FROM "%s"."%s" %s`, fb.filter.Schema, fb.filter.TableName, whereClause)
 		}
 	}
 }
@@ -261,6 +270,15 @@ func (fb *FilterBuilder) View() string {
 		instructions = "a=Add n=New d=Delete Enter=Apply Esc=Cancel"
 	}
 	sections = append(sections, instructionStyle.Render(instructions))
+
+	// Validation error
+	if fb.validationError != "" {
+		errorStyle := lipgloss.NewStyle().
+			Foreground(fb.Theme.Error).
+			Padding(0, 1).
+			Bold(true)
+		sections = append(sections, errorStyle.Render("Error: "+fb.validationError))
+	}
 
 	// Conditions list
 	if len(fb.filter.RootGroup.Conditions) > 0 {
