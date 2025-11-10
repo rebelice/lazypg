@@ -1049,21 +1049,25 @@ func (a *App) getTableColumns() []models.ColumnInfo {
 		return nil
 	}
 
-	// Extract columns from table view
-	columns := []models.ColumnInfo{}
+	conn, err := a.connectionManager.GetActive()
+	if err != nil {
+		return nil
+	}
 
-	// Get column names from the current table view
-	// This is a placeholder - actual implementation depends on how you store column metadata
-	// For now, we'll return columns from the tableView
-	if len(a.tableView.Columns) > 0 {
-		for _, header := range a.tableView.Columns {
-			columns = append(columns, models.ColumnInfo{
-				Name:     header,
-				DataType: "text", // Default type, should be enhanced with actual type info
-				IsArray:  false,
-				IsJsonb:  false,
-			})
-		}
+	// Get schema from parent node
+	schemaNode := a.state.TreeSelected.Parent
+	if schemaNode == nil {
+		return nil
+	}
+
+	columns, err := metadata.GetTableColumns(
+		context.Background(),
+		conn.Pool,
+		schemaNode.Label,
+		a.state.TreeSelected.Label,
+	)
+	if err != nil {
+		return nil
 	}
 
 	return columns
