@@ -114,11 +114,12 @@ func (fb *FilterBuilder) handleNavigationMode(msg tea.KeyMsg) (*FilterBuilder, t
 			fb.updatePreview()
 		}
 	case "enter":
-		// Apply filter
-		if len(fb.filter.RootGroup.Conditions) == 0 {
-			fb.validationError = "Add at least one condition before applying filter"
+		// Validate and apply filter
+		if err := fb.builder.Validate(fb.filter); err != nil {
+			fb.validationError = err.Error()
 			return fb, nil
 		}
+
 		fb.validationError = ""
 		return fb, func() tea.Msg {
 			return ApplyFilterMsg{Filter: fb.filter}
@@ -271,13 +272,13 @@ func (fb *FilterBuilder) View() string {
 	}
 	sections = append(sections, instructionStyle.Render(instructions))
 
-	// Validation error
+	// Show validation error if present
 	if fb.validationError != "" {
 		errorStyle := lipgloss.NewStyle().
 			Foreground(fb.Theme.Error).
 			Padding(0, 1).
 			Bold(true)
-		sections = append(sections, errorStyle.Render("Error: "+fb.validationError))
+		sections = append(sections, errorStyle.Render("Warning: "+fb.validationError))
 	}
 
 	// Conditions list

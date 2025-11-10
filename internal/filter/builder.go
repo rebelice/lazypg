@@ -94,6 +94,47 @@ func (b *Builder) buildCondition(cond models.FilterCondition, paramIndex int) (s
 	}
 }
 
+// Validate checks if a filter is valid
+func (b *Builder) Validate(filter models.Filter) error {
+	if filter.TableName == "" {
+		return fmt.Errorf("table name is required")
+	}
+
+	return b.validateGroup(filter.RootGroup)
+}
+
+// validateGroup validates a filter group
+func (b *Builder) validateGroup(group models.FilterGroup) error {
+	for _, cond := range group.Conditions {
+		if err := b.validateCondition(cond); err != nil {
+			return err
+		}
+	}
+
+	for _, subGroup := range group.Groups {
+		if err := b.validateGroup(subGroup); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// validateCondition validates a single condition
+func (b *Builder) validateCondition(cond models.FilterCondition) error {
+	if cond.Column == "" {
+		return fmt.Errorf("column name is required")
+	}
+
+	// Check if value is required for operator
+	requiresValue := cond.Operator != models.OpIsNull && cond.Operator != models.OpIsNotNull
+	if requiresValue && cond.Value == nil {
+		return fmt.Errorf("value is required for operator %s", cond.Operator)
+	}
+
+	return nil
+}
+
 // GetOperatorsForType returns available operators for a given PostgreSQL type
 func GetOperatorsForType(dataType string) []models.FilterOperator {
 	// Normalize to lowercase for case-insensitive matching
