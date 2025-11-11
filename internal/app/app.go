@@ -1167,8 +1167,8 @@ func (a *App) handleConnectionDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a.connectionDialog.ManualMode {
 			a.connectionDialog.NextInput()
 		} else {
-			// In discovery mode, switch between discovered and history tabs
-			a.connectionDialog.SwitchTab()
+			// In discovery mode, switch between history and discovered sections
+			a.connectionDialog.SwitchSection()
 		}
 		return a, nil
 
@@ -1250,7 +1250,7 @@ func (a *App) handleConnectionDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			var config models.ConnectionConfig
 
 			// Check if browsing history or discovered instances
-			if a.connectionDialog.HistoryMode {
+			if a.connectionDialog.InHistorySection {
 				// Get selected history entry
 				historyEntry := a.connectionDialog.GetSelectedHistory()
 				if historyEntry == nil {
