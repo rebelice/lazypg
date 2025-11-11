@@ -223,6 +223,11 @@ func New(cfg *config.Config) *App {
 
 // Init implements tea.Model
 func (a *App) Init() tea.Cmd {
+	// If no active connection, automatically show connection dialog on startup
+	if a.state.ActiveConnection == nil {
+		a.showConnectionDialog = true
+		return a.triggerDiscovery()
+	}
 	return nil
 }
 
