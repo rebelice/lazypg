@@ -1258,9 +1258,12 @@ func (a *App) handleConnectionDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					return a, nil
 				}
 
-				// Convert history entry to connection config
-				config = historyEntry.ToConnectionConfig()
-				// Note: Password not stored in history, will be empty
+				// Convert history entry to connection config WITH password from keyring
+				if a.connectionHistory != nil {
+					config = a.connectionHistory.GetConnectionConfigWithPassword(historyEntry)
+				} else {
+					config = historyEntry.ToConnectionConfig()
+				}
 			} else {
 				// Get selected discovered instance
 				instance := a.connectionDialog.GetSelectedInstance()

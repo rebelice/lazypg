@@ -14,8 +14,9 @@ import (
 
 // Manager manages connection history
 type Manager struct {
-	path    string
-	history []models.ConnectionHistoryEntry
+	path          string
+	history       []models.ConnectionHistoryEntry
+	passwordStore *PasswordStore
 }
 
 // NewManager creates a new connection history manager
@@ -23,8 +24,9 @@ func NewManager(configDir string) (*Manager, error) {
 	path := filepath.Join(configDir, "connection_history.yaml")
 
 	m := &Manager{
-		path:    path,
-		history: []models.ConnectionHistoryEntry{},
+		path:          path,
+		history:       []models.ConnectionHistoryEntry{},
+		passwordStore: NewPasswordStore(),
 	}
 
 	// Load existing history if file exists
@@ -73,6 +75,14 @@ func (m *Manager) Save() error {
 
 // Add adds or updates a connection in history
 func (m *Manager) Add(config models.ConnectionConfig) error {
+	// Save password to secure keyring (if provided)
+	if config.Password != "" && m.passwordStore != nil {
+		if err := m.passwordStore.Save(config.Host, config.Port, config.Database, config.User, config.Password); err != nil {
+			// Log error but don't fail - password storage is optional
+			fmt.Printf("Warning: Failed to save password to keyring: %v\n", err)
+		}
+	}
+
 	// Check if this connection already exists (match by host, port, database, user)
 	for i, entry := range m.history {
 		if entry.Host == config.Host &&
@@ -156,9 +166,28 @@ func (m *Manager) GetMostUsed(limit int) []models.ConnectionHistoryEntry {
 func (m *Manager) Delete(id string) error {
 	for i, entry := range m.history {
 		if entry.ID == id {
+			// Also delete password from keyring
+			if m.passwordStore != nil {
+				_ = m.passwordStore.Delete(entry.Host, entry.Port, entry.Database, entry.User)
+			}
 			m.history = append(m.history[:i], m.history[i+1:]...)
 			return m.Save()
 		}
 	}
 	return fmt.Errorf("connection history entry with ID '%s' not found", id)
+}
+
+// GetConnectionConfigWithPassword returns a ConnectionConfig with password retrieved from keyring
+func (m *Manager) GetConnectionConfigWithPassword(entry *models.ConnectionHistoryEntry) models.ConnectionConfig {
+	config := entry.ToConnectionConfig()
+
+	// Try to get password from keyring
+	if m.passwordStore != nil {
+		password, err := m.passwordStore.Get(entry.Host, entry.Port, entry.Database, entry.User)
+		if err == nil {
+			config.Password = password
+		}
+	}
+
+	return config
 }
