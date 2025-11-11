@@ -80,7 +80,7 @@ func NewConnectionDialog(th theme.Theme) *ConnectionDialog {
 
 	// Password input
 	inputs[passwordField] = textinput.New()
-	inputs[passwordField].Placeholder = "password"
+	inputs[passwordField].Placeholder = ""
 	inputs[passwordField].EchoMode = textinput.EchoPassword
 	inputs[passwordField].EchoCharacter = '•'
 	inputs[passwordField].PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#cba6f7"))
