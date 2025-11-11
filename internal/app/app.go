@@ -17,6 +17,7 @@ import (
 	"github.com/rebeliceyang/lazypg/internal/db/discovery"
 	"github.com/rebeliceyang/lazypg/internal/db/metadata"
 	"github.com/rebeliceyang/lazypg/internal/db/query"
+	"github.com/rebeliceyang/lazypg/internal/connection_history"
 	"github.com/rebeliceyang/lazypg/internal/favorites"
 	filterBuilder "github.com/rebeliceyang/lazypg/internal/filter"
 	"github.com/rebeliceyang/lazypg/internal/history"
@@ -79,6 +80,9 @@ type App struct {
 	showFavorites    bool
 	favoritesManager *favorites.Manager
 	favoritesDialog  *components.FavoritesDialog
+
+	// Connection history
+	connectionHistory *connection_history.Manager
 }
 
 // DiscoveryCompleteMsg is sent when discovery completes
@@ -171,6 +175,12 @@ func New(cfg *config.Config) *App {
 		log.Printf("Warning: Could not initialize favorites: %v", err)
 	}
 
+	// Initialize connection history manager
+	connectionHistory, err := connection_history.NewManager(configDir)
+	if err != nil {
+		log.Printf("Warning: Could not initialize connection history: %v", err)
+	}
+
 	// Initialize filter builder
 	filterBuilder := components.NewFilterBuilder(th)
 
@@ -202,6 +212,7 @@ func New(cfg *config.Config) *App {
 		showFavorites:     false,
 		favoritesManager:  favoritesManager,
 		favoritesDialog:   favoritesDialog,
+		connectionHistory: connectionHistory,
 		leftPanel: components.Panel{
 			Title:   "Navigation",
 			Content: "Databases\n└─ (empty)",
@@ -223,6 +234,12 @@ func New(cfg *config.Config) *App {
 
 // Init implements tea.Model
 func (a *App) Init() tea.Cmd {
+	// Load connection history if available
+	if a.connectionHistory != nil {
+		history := a.connectionHistory.GetRecent(10) // Show up to 10 recent connections
+		a.connectionDialog.SetHistoryEntries(history)
+	}
+
 	// If no active connection, automatically show connection dialog on startup
 	if a.state.ActiveConnection == nil {
 		a.showConnectionDialog = true
@@ -1149,6 +1166,9 @@ func (a *App) handleConnectionDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "tab":
 		if a.connectionDialog.ManualMode {
 			a.connectionDialog.NextInput()
+		} else {
+			// In discovery mode, switch between discovered and history tabs
+			a.connectionDialog.SwitchTab()
 		}
 		return a, nil
 
@@ -1210,32 +1230,59 @@ func (a *App) handleConnectionDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 
+			// Save to connection history (ignore errors)
+			if a.connectionHistory != nil {
+				if err := a.connectionHistory.Add(config); err != nil {
+					log.Printf("Warning: Failed to save connection to history: %v", err)
+				} else {
+					// Reload history in dialog
+					history := a.connectionHistory.GetRecent(10)
+					a.connectionDialog.SetHistoryEntries(history)
+				}
+			}
+
 			// Trigger tree loading
 			a.showConnectionDialog = false
 			return a, func() tea.Msg {
 				return LoadTreeMsg{}
 			}
 		} else {
-			// Get selected discovered instance
-			instance := a.connectionDialog.GetSelectedInstance()
-			if instance == nil {
-				// No instance selected
-				return a, nil
+			var config models.ConnectionConfig
+
+			// Check if browsing history or discovered instances
+			if a.connectionDialog.HistoryMode {
+				// Get selected history entry
+				historyEntry := a.connectionDialog.GetSelectedHistory()
+				if historyEntry == nil {
+					// No history entry selected
+					return a, nil
+				}
+
+				// Convert history entry to connection config
+				config = historyEntry.ToConnectionConfig()
+				// Note: Password not stored in history, will be empty
+			} else {
+				// Get selected discovered instance
+				instance := a.connectionDialog.GetSelectedInstance()
+				if instance == nil {
+					// No instance selected
+					return a, nil
+				}
+
+				// Create connection config from discovered instance
+				// Note: We'll need to prompt for database/user/password in future
+				// For now, use common defaults
+				config = models.ConnectionConfig{
+					Host:     instance.Host,
+					Port:     instance.Port,
+					Database: "postgres",          // Default database
+					User:     os.Getenv("USER"),   // Current user
+					Password: "",                  // No password for now
+					SSLMode:  "prefer",
+				}
 			}
 
-			// Create connection config from discovered instance
-			// Note: We'll need to prompt for database/user/password in future
-			// For now, use common defaults
-			config := models.ConnectionConfig{
-				Host:     instance.Host,
-				Port:     instance.Port,
-				Database: "postgres", // Default database
-				User:     os.Getenv("USER"), // Current user
-				Password: "", // No password for now
-				SSLMode:  "prefer",
-			}
-
-			// Connect using discovered instance
+			// Connect using the configuration
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 
@@ -1257,6 +1304,17 @@ func (a *App) handleConnectionDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					ConnectedAt: conn.ConnectedAt,
 					LastPing:    conn.LastPing,
 					Error:       conn.Error,
+				}
+			}
+
+			// Save to connection history (ignore errors)
+			if a.connectionHistory != nil {
+				if err := a.connectionHistory.Add(config); err != nil {
+					log.Printf("Warning: Failed to save connection to history: %v", err)
+				} else {
+					// Reload history in dialog
+					history := a.connectionHistory.GetRecent(10)
+					a.connectionDialog.SetHistoryEntries(history)
 				}
 			}
 

@@ -18,8 +18,10 @@ type ConnectionDialog struct {
 	Height              int
 	Theme               theme.Theme
 	DiscoveredInstances []models.DiscoveredInstance
+	HistoryEntries      []models.ConnectionHistoryEntry
 	ManualMode          bool
 	SelectedIndex       int
+	HistoryMode         bool // true = browsing history, false = browsing discovered
 
 	// Text input fields for manual mode
 	inputs      []textinput.Model
@@ -153,58 +155,101 @@ func (c *ConnectionDialog) renderDiscoveryMode() string {
 		MarginBottom(1)
 	sections = append(sections, titleStyle.Render("🔌 Connect to PostgreSQL"))
 
-	if len(c.DiscoveredInstances) == 0 {
-		// Loading state
-		loadingStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#a6adc8")).
-			Italic(true)
-		sections = append(sections, loadingStyle.Render("🔍 Discovering PostgreSQL instances..."))
-		sections = append(sections, "")
+	// Tabs
+	tabStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#a6adc8")).
+		Padding(0, 2)
+	activeTabStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#cba6f7")).
+		Background(lipgloss.Color("#45475a")).
+		Bold(true).
+		Padding(0, 2)
 
-		hintStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6c7086"))
-		sections = append(sections, hintStyle.Render("Press 'm' for manual connection"))
+	var tabs []string
+	if !c.HistoryMode {
+		tabs = append(tabs, activeTabStyle.Render("📡 Discovered"))
+		tabs = append(tabs, tabStyle.Render("📜 History"))
 	} else {
-		// Instances list
-		listHeader := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#a6adc8")).
-			Bold(true).
-			Render("Discovered Instances:")
-		sections = append(sections, listHeader)
-		sections = append(sections, "")
-
-		for i, instance := range c.DiscoveredInstances {
-			itemStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#cdd6f4")).
-				PaddingLeft(2)
-
-			if i == c.SelectedIndex {
-				itemStyle = itemStyle.
-					Foreground(lipgloss.Color("#1e1e2e")).
-					Background(lipgloss.Color("#cba6f7")).
-					Bold(true).
-					PaddingLeft(1)
-			}
-
-			sourceStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#6c7086")).
-				Italic(true)
-
-			line := fmt.Sprintf("%s:%d  %s",
-				instance.Host,
-				instance.Port,
-				sourceStyle.Render(fmt.Sprintf("(%s)", instance.Source.String())),
-			)
-			sections = append(sections, itemStyle.Render(line))
-		}
-
-		sections = append(sections, "")
-
-		// Instructions
-		helpStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6c7086"))
-		sections = append(sections, helpStyle.Render("↑↓: Select  │  Enter: Connect  │  m: Manual  │  Esc: Cancel"))
+		tabs = append(tabs, tabStyle.Render("📡 Discovered"))
+		tabs = append(tabs, activeTabStyle.Render("📜 History"))
 	}
+	sections = append(sections, strings.Join(tabs, "  "))
+	sections = append(sections, "")
+
+	// Show either discovered instances or history based on mode
+	if !c.HistoryMode {
+		// Discovered instances
+		if len(c.DiscoveredInstances) == 0 {
+			loadingStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#a6adc8")).
+				Italic(true)
+			sections = append(sections, loadingStyle.Render("🔍 Discovering PostgreSQL instances..."))
+		} else {
+			for i, instance := range c.DiscoveredInstances {
+				itemStyle := lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#cdd6f4")).
+					PaddingLeft(2)
+
+				if i == c.SelectedIndex {
+					itemStyle = itemStyle.
+						Foreground(lipgloss.Color("#1e1e2e")).
+						Background(lipgloss.Color("#cba6f7")).
+						Bold(true).
+						PaddingLeft(1)
+				}
+
+				sourceStyle := lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#6c7086")).
+					Italic(true)
+
+				line := fmt.Sprintf("%s:%d  %s",
+					instance.Host,
+					instance.Port,
+					sourceStyle.Render(fmt.Sprintf("(%s)", instance.Source.String())),
+				)
+				sections = append(sections, itemStyle.Render(line))
+			}
+		}
+	} else {
+		// History entries
+		if len(c.HistoryEntries) == 0 {
+			emptyStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#a6adc8")).
+				Italic(true)
+			sections = append(sections, emptyStyle.Render("No connection history yet"))
+		} else {
+			for i, entry := range c.HistoryEntries {
+				itemStyle := lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#cdd6f4")).
+					PaddingLeft(2)
+
+				if i == c.SelectedIndex {
+					itemStyle = itemStyle.
+						Foreground(lipgloss.Color("#1e1e2e")).
+						Background(lipgloss.Color("#cba6f7")).
+						Bold(true).
+						PaddingLeft(1)
+				}
+
+				metaStyle := lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#6c7086")).
+					Italic(true)
+
+				line := fmt.Sprintf("%s  %s",
+					entry.Name,
+					metaStyle.Render(fmt.Sprintf("(used %dx)", entry.UsageCount)),
+				)
+				sections = append(sections, itemStyle.Render(line))
+			}
+		}
+	}
+
+	sections = append(sections, "")
+
+	// Instructions
+	helpStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#6c7086"))
+	sections = append(sections, helpStyle.Render("↑↓: Select  │  Tab: Switch  │  Enter: Connect  │  m: Manual  │  Esc: Cancel"))
 
 	return strings.Join(sections, "\n")
 }
@@ -278,7 +323,15 @@ func (c *ConnectionDialog) MoveSelection(delta int) {
 			c.PrevInput()
 		}
 	} else {
-		if len(c.DiscoveredInstances) == 0 {
+		// Get the list size based on current mode
+		listSize := 0
+		if c.HistoryMode {
+			listSize = len(c.HistoryEntries)
+		} else {
+			listSize = len(c.DiscoveredInstances)
+		}
+
+		if listSize == 0 {
 			c.SelectedIndex = 0
 			return
 		}
@@ -286,10 +339,16 @@ func (c *ConnectionDialog) MoveSelection(delta int) {
 		if c.SelectedIndex < 0 {
 			c.SelectedIndex = 0
 		}
-		if c.SelectedIndex >= len(c.DiscoveredInstances) {
-			c.SelectedIndex = len(c.DiscoveredInstances) - 1
+		if c.SelectedIndex >= listSize {
+			c.SelectedIndex = listSize - 1
 		}
 	}
+}
+
+// SwitchTab switches between discovered and history tabs
+func (c *ConnectionDialog) SwitchTab() {
+	c.HistoryMode = !c.HistoryMode
+	c.SelectedIndex = 0 // Reset selection when switching tabs
 }
 
 // ToggleMode switches between discovery and manual mode
@@ -309,10 +368,18 @@ func (c *ConnectionDialog) ToggleMode() {
 
 // GetSelectedInstance returns the currently selected instance
 func (c *ConnectionDialog) GetSelectedInstance() *models.DiscoveredInstance {
-	if c.ManualMode || c.SelectedIndex < 0 || c.SelectedIndex >= len(c.DiscoveredInstances) {
+	if c.ManualMode || c.HistoryMode || c.SelectedIndex < 0 || c.SelectedIndex >= len(c.DiscoveredInstances) {
 		return nil
 	}
 	return &c.DiscoveredInstances[c.SelectedIndex]
+}
+
+// GetSelectedHistory returns the currently selected history entry
+func (c *ConnectionDialog) GetSelectedHistory() *models.ConnectionHistoryEntry {
+	if c.ManualMode || !c.HistoryMode || c.SelectedIndex < 0 || c.SelectedIndex >= len(c.HistoryEntries) {
+		return nil
+	}
+	return &c.HistoryEntries[c.SelectedIndex]
 }
 
 // GetManualConfig returns the manual connection config if valid, or error
@@ -361,7 +428,15 @@ func (c *ConnectionDialog) GetManualConfig() (models.ConnectionConfig, error) {
 // SetDiscoveredInstances updates the list of discovered instances
 func (c *ConnectionDialog) SetDiscoveredInstances(instances []models.DiscoveredInstance) {
 	c.DiscoveredInstances = instances
-	if c.SelectedIndex >= len(instances) {
+	if !c.HistoryMode && c.SelectedIndex >= len(instances) {
+		c.SelectedIndex = 0
+	}
+}
+
+// SetHistoryEntries updates the list of connection history entries
+func (c *ConnectionDialog) SetHistoryEntries(entries []models.ConnectionHistoryEntry) {
+	c.HistoryEntries = entries
+	if c.HistoryMode && c.SelectedIndex >= len(entries) {
 		c.SelectedIndex = 0
 	}
 }

@@ -74,3 +74,31 @@ func (s DiscoverySource) String() string {
 		return "Unknown"
 	}
 }
+
+// ConnectionHistoryEntry represents a saved connection from history
+type ConnectionHistoryEntry struct {
+	ID          string    `yaml:"id"`
+	Name        string    `yaml:"name"`         // User-friendly name (auto-generated or custom)
+	Host        string    `yaml:"host"`
+	Port        int       `yaml:"port"`
+	Database    string    `yaml:"database"`
+	User        string    `yaml:"user"`
+	// Note: Password is NOT stored for security reasons
+	SSLMode     string    `yaml:"ssl_mode"`
+	LastUsed    time.Time `yaml:"last_used"`
+	UsageCount  int       `yaml:"usage_count"`
+	CreatedAt   time.Time `yaml:"created_at"`
+}
+
+// ToConnectionConfig converts a history entry to a ConnectionConfig (without password)
+func (e *ConnectionHistoryEntry) ToConnectionConfig() ConnectionConfig {
+	return ConnectionConfig{
+		Name:     e.Name,
+		Host:     e.Host,
+		Port:     e.Port,
+		Database: e.Database,
+		User:     e.User,
+		Password: "", // Password not stored in history
+		SSLMode:  e.SSLMode,
+	}
+}
