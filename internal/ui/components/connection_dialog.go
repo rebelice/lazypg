@@ -246,10 +246,10 @@ func (c *ConnectionDialog) renderDiscoveryMode() string {
 
 	sections = append(sections, "")
 
-	// Instructions
+	// Instructions (keep under 68 chars to fit MaxWidth(76) with padding)
 	helpStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#6c7086"))
-	sections = append(sections, helpStyle.Render("↑↓: Select  │  Tab: Switch  │  Enter: Connect  │  m: Manual  │  Esc: Cancel"))
+	sections = append(sections, helpStyle.Render("↑↓: Navigate │ Tab: Switch │ Enter: Connect │ m: Manual"))
 
 	return strings.Join(sections, "\n")
 }
