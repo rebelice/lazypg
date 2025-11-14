@@ -62,6 +62,17 @@ func GetDataViewKeys() []KeyBinding {
 	}
 }
 
+// GetStructureViewKeys returns structure view key bindings
+func GetStructureViewKeys() []KeyBinding {
+	return []KeyBinding{
+		{"Ctrl+1/2/3/4", "Switch tabs (Data/Columns/Constraints/Indexes)"},
+		{"↑↓ or j/k", "Navigate rows"},
+		{"←→ or h/l", "Switch tabs"},
+		{"y", "Copy name"},
+		{"Y", "Copy definition"},
+	}
+}
+
 // Render creates the help view
 func Render(width, height int, theme lipgloss.Style) string {
 	titleStyle := lipgloss.NewStyle().
@@ -124,6 +135,17 @@ func Render(width, height int, theme lipgloss.Style) string {
 	b.WriteString(sectionStyle.Render("Data View"))
 	b.WriteString("\n")
 	for _, kb := range GetDataViewKeys() {
+		b.WriteString("  ")
+		b.WriteString(keyStyle.Render(kb.Key))
+		b.WriteString(descStyle.Render(kb.Description))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+
+	// Structure view keys
+	b.WriteString(sectionStyle.Render("Structure View"))
+	b.WriteString("\n")
+	for _, kb := range GetStructureViewKeys() {
 		b.WriteString("  ")
 		b.WriteString(keyStyle.Render(kb.Key))
 		b.WriteString(descStyle.Render(kb.Description))
