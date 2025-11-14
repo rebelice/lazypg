@@ -23,6 +23,7 @@ type StructureView struct {
 	activeTab int
 
 	// Tab views
+	tableView       *TableView      // For Data tab
 	columnsView     *ColumnsView
 	constraintsView *ConstraintsView
 	indexesView     *IndexesView
@@ -38,10 +39,11 @@ type StructureView struct {
 }
 
 // NewStructureView creates a new structure view
-func NewStructureView(th theme.Theme) *StructureView {
+func NewStructureView(th theme.Theme, tableView *TableView) *StructureView {
 	return &StructureView{
 		Theme:           th,
-		activeTab:       1, // Start with Columns tab
+		activeTab:       0, // Start with Data tab
+		tableView:       tableView,
 		columnsView:     NewColumnsView(th),
 		constraintsView: NewConstraintsView(th),
 		indexesView:     NewIndexesView(th),
@@ -160,6 +162,8 @@ func (sv *StructureView) View() string {
 	contentHeight := sv.Height - 1
 
 	// Update view dimensions
+	sv.tableView.Width = sv.Width
+	sv.tableView.Height = contentHeight
 	sv.columnsView.Width = sv.Width
 	sv.columnsView.Height = contentHeight
 	sv.constraintsView.Width = sv.Width
@@ -169,6 +173,8 @@ func (sv *StructureView) View() string {
 
 	// Render active tab content
 	switch sv.activeTab {
+	case 0:
+		b.WriteString(sv.tableView.View())
 	case 1:
 		b.WriteString(sv.columnsView.View())
 	case 2:
@@ -176,7 +182,7 @@ func (sv *StructureView) View() string {
 	case 3:
 		b.WriteString(sv.indexesView.View())
 	default:
-		b.WriteString("Data view handled separately")
+		b.WriteString("Unknown tab")
 	}
 
 	return b.String()

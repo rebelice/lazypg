@@ -192,8 +192,11 @@ func New(cfg *config.Config) *App {
 	// Initialize JSONB viewer
 	jsonbViewer := components.NewJSONBViewer(th)
 
-	// Initialize structure view
-	structureView := components.NewStructureView(th)
+	// Initialize table view (needed by structure view)
+	tableView := components.NewTableView(th)
+
+	// Initialize structure view with shared table view
+	structureView := components.NewStructureView(th, tableView)
 
 	// Initialize favorites dialog
 	favoritesDialog := components.NewFavoritesDialog(th)
@@ -211,7 +214,7 @@ func New(cfg *config.Config) *App {
 		commandPalette:    components.NewCommandPalette(th),
 		quickQuery:        components.NewQuickQuery(th),
 		historyStore:      historyStore,
-		tableView:         components.NewTableView(th),
+		tableView:         tableView,
 		showFilterBuilder: false,
 		filterBuilder:     filterBuilder,
 		activeFilter:      nil,
@@ -1139,7 +1142,7 @@ func (a *App) renderNormalView() string {
 
 // renderRightPanel renders the right panel content based on current state
 func (a *App) renderRightPanel(width, height int) string {
-	// If table is selected, show structure view
+	// If table is selected, show structure view with tabs
 	if a.currentTable != "" {
 		// Update structure view dimensions
 		a.structureView.Width = width
@@ -1161,15 +1164,7 @@ func (a *App) renderRightPanel(width, height int) string {
 			}
 		}
 
-		// If Data tab is active, show existing table view
-		if a.currentTab == 0 {
-			// Existing table view rendering
-			a.tableView.Width = width
-			a.tableView.Height = height
-			return a.tableView.View()
-		}
-
-		// Otherwise show structure view
+		// Always show structure view (it handles tabs internally)
 		return a.structureView.View()
 	}
 
