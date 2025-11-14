@@ -54,9 +54,20 @@ type JSONBViewer struct {
 	scrollOffset  int // Scroll offset for viewport
 
 	// Search state
-	searchMode   bool
-	searchQuery  string
-	searchResult []*TreeNode // Nodes matching search
+	searchMode        bool
+	searchQuery       string
+	searchResults     []*TreeNode // All nodes matching search (including collapsed)
+	currentMatchIndex int         // Current position in searchResults
+
+	// Quick jump state
+	quickJumpMode   bool
+	quickJumpBuffer string
+
+	// Marks/bookmarks (a-z)
+	marks map[rune]*TreeNode
+
+	// Help mode
+	helpMode bool
 }
 
 // NewJSONBViewer creates a new tree-based JSONB viewer
@@ -67,6 +78,7 @@ func NewJSONBViewer(th theme.Theme) *JSONBViewer {
 		Theme:         th,
 		selectedIndex: 0,
 		scrollOffset:  0,
+		marks:         make(map[rune]*TreeNode),
 	}
 }
 
@@ -178,16 +190,28 @@ func (jv *JSONBViewer) flattenTree(node *TreeNode) {
 
 // Update handles keyboard input
 func (jv *JSONBViewer) Update(msg tea.KeyMsg) (*JSONBViewer, tea.Cmd) {
+	// Handle help mode
+	if jv.helpMode {
+		// Any key exits help mode
+		jv.helpMode = false
+		return jv, nil
+	}
+
 	// Handle search mode
 	if jv.searchMode {
 		switch msg.String() {
 		case "esc":
 			jv.searchMode = false
 			jv.searchQuery = ""
-			jv.searchResult = nil
+			jv.searchResults = nil
+			jv.currentMatchIndex = 0
 			return jv, nil
 		case "enter":
+			// Confirm search and stay in results navigation mode
 			jv.searchMode = false
+			if len(jv.searchResults) > 0 {
+				jv.jumpToMatch(0)
+			}
 			return jv, nil
 		case "backspace":
 			if len(jv.searchQuery) > 0 {
@@ -208,6 +232,14 @@ func (jv *JSONBViewer) Update(msg tea.KeyMsg) (*JSONBViewer, tea.Cmd) {
 	// Normal navigation mode
 	switch msg.String() {
 	case "esc", "q":
+		// If we have active search results, clear them first
+		if len(jv.searchResults) > 0 {
+			jv.searchResults = nil
+			jv.searchQuery = ""
+			jv.currentMatchIndex = 0
+			return jv, nil
+		}
+		// Otherwise close viewer
 		return jv, func() tea.Msg {
 			return CloseJSONBViewerMsg{}
 		}
@@ -231,6 +263,14 @@ func (jv *JSONBViewer) Update(msg tea.KeyMsg) (*JSONBViewer, tea.Cmd) {
 			if node.Type == NodeObject || node.Type == NodeArray {
 				node.IsExpanded = !node.IsExpanded
 				jv.rebuildVisibleNodes()
+				// Keep selection within bounds after collapse/expand
+				if jv.selectedIndex >= len(jv.visibleNodes) {
+					jv.selectedIndex = len(jv.visibleNodes) - 1
+				}
+				if jv.selectedIndex < 0 {
+					jv.selectedIndex = 0
+				}
+				jv.adjustScroll()
 			}
 		}
 
@@ -238,17 +278,159 @@ func (jv *JSONBViewer) Update(msg tea.KeyMsg) (*JSONBViewer, tea.Cmd) {
 		// Expand all
 		jv.expandAll(jv.root)
 		jv.rebuildVisibleNodes()
+		// Keep selection within bounds
+		if jv.selectedIndex >= len(jv.visibleNodes) {
+			jv.selectedIndex = len(jv.visibleNodes) - 1
+		}
+		if jv.selectedIndex < 0 {
+			jv.selectedIndex = 0
+		}
+		jv.adjustScroll()
 
 	case "C":
 		// Collapse all
 		jv.collapseAll(jv.root)
 		jv.rebuildVisibleNodes()
+		// Keep selection within bounds
+		if jv.selectedIndex >= len(jv.visibleNodes) {
+			jv.selectedIndex = len(jv.visibleNodes) - 1
+		}
+		if jv.selectedIndex < 0 {
+			jv.selectedIndex = 0
+		}
+		jv.adjustScroll()
 
 	case "/":
 		// Enter search mode
 		jv.searchMode = true
 		jv.searchQuery = ""
-		jv.searchResult = nil
+		jv.searchResults = nil
+		jv.currentMatchIndex = 0
+
+	case "n":
+		// Next search result
+		if len(jv.searchResults) > 0 {
+			jv.currentMatchIndex++
+			if jv.currentMatchIndex >= len(jv.searchResults) {
+				jv.currentMatchIndex = 0 // Wrap around
+			}
+			jv.jumpToMatch(jv.currentMatchIndex)
+		}
+
+	case "N":
+		// Previous search result
+		if len(jv.searchResults) > 0 {
+			jv.currentMatchIndex--
+			if jv.currentMatchIndex < 0 {
+				jv.currentMatchIndex = len(jv.searchResults) - 1 // Wrap around
+			}
+			jv.jumpToMatch(jv.currentMatchIndex)
+		}
+
+	// === Phase 1: Basic Navigation ===
+	case "ctrl+f", "pgdown":
+		// Page down
+		jv.pageDown()
+
+	case "ctrl+b", "pgup":
+		// Page up
+		jv.pageUp()
+
+	case "ctrl+d":
+		// Half page down
+		jv.halfPageDown()
+
+	case "ctrl+u":
+		// Half page up
+		jv.halfPageUp()
+
+	case "g", "home":
+		// Jump to first node
+		jv.selectedIndex = 0
+		jv.adjustScroll()
+
+	case "G", "end":
+		// Jump to last node
+		if len(jv.visibleNodes) > 0 {
+			jv.selectedIndex = len(jv.visibleNodes) - 1
+			jv.adjustScroll()
+		}
+
+	case "J":
+		// Jump to next sibling
+		jv.jumpToNextSibling()
+
+	case "K":
+		// Jump to previous sibling
+		jv.jumpToPrevSibling()
+
+	case "p":
+		// Jump to parent
+		jv.jumpToParent()
+
+	// === Phase 2: JSON-specific Navigation ===
+	case "]":
+		// Jump to next array
+		jv.jumpToNextOfType(NodeArray)
+
+	case "[":
+		// Jump to previous array
+		jv.jumpToPrevOfType(NodeArray)
+
+	case "}":
+		// Jump to next object
+		jv.jumpToNextOfType(NodeObject)
+
+	case "{":
+		// Jump to previous object
+		jv.jumpToPrevOfType(NodeObject)
+
+	case "\"":
+		// Jump to next string value
+		jv.jumpToNextOfType(NodeString)
+
+	case "#":
+		// Jump to next number value
+		jv.jumpToNextOfType(NodeNumber)
+
+	case "]a":
+		// Jump to next array item (within same array)
+		jv.jumpToNextArrayItem()
+
+	case "[a":
+		// Jump to previous array item (within same array)
+		jv.jumpToPrevArrayItem()
+
+	case "y":
+		// Copy JSON path to clipboard (yank)
+		jv.copyCurrentPath()
+
+	// === Phase 3: Advanced Features ===
+	case "m":
+		// Enter mark mode (next key will be the mark name)
+		jv.quickJumpMode = true
+		jv.quickJumpBuffer = "m"
+
+	case "'":
+		// Enter jump to mark mode
+		jv.quickJumpMode = true
+		jv.quickJumpBuffer = "'"
+
+	case "?":
+		// Toggle help mode
+		jv.helpMode = !jv.helpMode
+
+	default:
+		// Handle quick jump mode
+		if jv.quickJumpMode && len(msg.String()) == 1 {
+			jv.handleQuickJump(msg.String())
+			return jv, nil
+		}
+
+		// Handle first-letter quick jump (when not in any special mode)
+		if len(msg.String()) == 1 && msg.String() >= "a" && msg.String() <= "z" {
+			jv.jumpToKeyStartingWith(msg.String())
+		}
 	}
 
 	return jv, nil
@@ -292,28 +474,87 @@ func (jv *JSONBViewer) collapseAll(node *TreeNode) {
 	}
 }
 
-// performSearch searches for nodes matching the query
+// performSearch searches for nodes matching the query (searches ALL nodes, not just visible ones)
 func (jv *JSONBViewer) performSearch() {
-	jv.searchResult = []*TreeNode{}
+	jv.searchResults = []*TreeNode{}
+	jv.currentMatchIndex = 0
+
 	if jv.searchQuery == "" {
 		return
 	}
 
 	query := strings.ToLower(jv.searchQuery)
-	for _, node := range jv.visibleNodes {
-		// Search in key name
-		if strings.Contains(strings.ToLower(node.Key), query) {
-			jv.searchResult = append(jv.searchResult, node)
-			continue
-		}
+	jv.searchInTree(jv.root, query)
 
-		// Search in value (for primitives)
-		if node.Type == NodeString || node.Type == NodeNumber || node.Type == NodeBoolean {
-			valueStr := fmt.Sprintf("%v", node.Value)
-			if strings.Contains(strings.ToLower(valueStr), query) {
-				jv.searchResult = append(jv.searchResult, node)
-			}
+	// If we found results, jump to the first one
+	if len(jv.searchResults) > 0 {
+		jv.jumpToMatch(0)
+	}
+}
+
+// searchInTree recursively searches all nodes in the tree
+func (jv *JSONBViewer) searchInTree(node *TreeNode, query string) {
+	if node == nil {
+		return
+	}
+
+	// Search in key name
+	matchesKey := strings.Contains(strings.ToLower(node.Key), query)
+
+	// Search in value (for primitives)
+	matchesValue := false
+	if node.Type == NodeString || node.Type == NodeNumber || node.Type == NodeBoolean {
+		valueStr := fmt.Sprintf("%v", node.Value)
+		matchesValue = strings.Contains(strings.ToLower(valueStr), query)
+	}
+
+	// Add to results if matches
+	if matchesKey || matchesValue {
+		jv.searchResults = append(jv.searchResults, node)
+	}
+
+	// Recursively search children
+	for _, child := range node.Children {
+		jv.searchInTree(child, query)
+	}
+}
+
+// jumpToMatch navigates to a specific search result
+func (jv *JSONBViewer) jumpToMatch(matchIndex int) {
+	if matchIndex < 0 || matchIndex >= len(jv.searchResults) {
+		return
+	}
+
+	targetNode := jv.searchResults[matchIndex]
+	jv.currentMatchIndex = matchIndex
+
+	// Expand all parent nodes to make target visible
+	jv.expandPathToNode(targetNode)
+
+	// Rebuild visible nodes
+	jv.rebuildVisibleNodes()
+
+	// Find the target node in visible nodes and select it
+	for i, node := range jv.visibleNodes {
+		if node == targetNode {
+			jv.selectedIndex = i
+			jv.adjustScroll()
+			break
 		}
+	}
+}
+
+// expandPathToNode expands all parent nodes leading to the target node
+func (jv *JSONBViewer) expandPathToNode(target *TreeNode) {
+	if target == nil {
+		return
+	}
+
+	// Walk up the tree and expand all parents
+	current := target.Parent
+	for current != nil {
+		current.IsExpanded = true
+		current = current.Parent
 	}
 }
 
@@ -338,22 +579,42 @@ func (jv *JSONBViewer) View() string {
 
 	if jv.searchMode {
 		searchBar := fmt.Sprintf("Search: %s_", jv.searchQuery)
-		if len(jv.searchResult) > 0 {
-			searchBar += fmt.Sprintf("  (%d matches)", len(jv.searchResult))
+		if len(jv.searchResults) > 0 {
+			searchBar += fmt.Sprintf("  (%d matches)", len(jv.searchResults))
 		}
 		sections = append(sections, instrStyle.Render(searchBar))
+	} else if jv.quickJumpMode {
+		// Show mark/jump mode
+		var modeInfo string
+		if jv.quickJumpBuffer == "m" {
+			modeInfo = "Mark mode: Press a-z to set mark"
+		} else if jv.quickJumpBuffer == "'" {
+			modeInfo = "Jump mode: Press a-z to jump to mark"
+		}
+		sections = append(sections, instrStyle.Render(modeInfo))
+	} else if len(jv.searchResults) > 0 {
+		// Show search results navigation info
+		searchInfo := fmt.Sprintf("Search: \"%s\" (%d/%d)  n: Next  N: Prev  Esc: Clear",
+			jv.searchQuery, jv.currentMatchIndex+1, len(jv.searchResults))
+		sections = append(sections, instrStyle.Render(searchInfo))
 	} else {
-		instr := "↑↓: Navigate  Space/Enter: Expand/Collapse  E: Expand All  C: Collapse All  /: Search  Esc: Close"
+		// Show help text - rotate through different hints
+		instr := "↑↓/jk: Move  g/G: Top/Bottom  Ctrl-f/b: Page  JK: Sibling  p: Parent  ]/[: Jump Type  y: Copy Path  m/': Mark  /: Search  ?: Help"
 		sections = append(sections, instrStyle.Render(instr))
 	}
 
-	// Content (tree view)
+	// Content (tree view or help)
 	contentHeight := jv.Height - 5
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
 
-	content := jv.renderTree(contentHeight)
+	var content string
+	if jv.helpMode {
+		content = jv.renderHelp()
+	} else {
+		content = jv.renderTree(contentHeight)
+	}
 	sections = append(sections, content)
 
 	// Status bar
@@ -394,15 +655,27 @@ func (jv *JSONBViewer) renderTree(height int) string {
 
 	for i := jv.scrollOffset; i < endIndex; i++ {
 		node := jv.visibleNodes[i]
-		line := jv.renderNode(node, i == jv.selectedIndex)
+		isSelected := i == jv.selectedIndex
+		isSearchMatch := jv.isSearchMatch(node)
+		line := jv.renderNode(node, isSelected, isSearchMatch)
 		lines = append(lines, line)
 	}
 
 	return strings.Join(lines, "\n")
 }
 
+// isSearchMatch checks if a node is in the current search results
+func (jv *JSONBViewer) isSearchMatch(node *TreeNode) bool {
+	for _, match := range jv.searchResults {
+		if match == node {
+			return true
+		}
+	}
+	return false
+}
+
 // renderNode renders a single tree node with proper indentation and styling
-func (jv *JSONBViewer) renderNode(node *TreeNode, isSelected bool) string {
+func (jv *JSONBViewer) renderNode(node *TreeNode, isSelected bool, isSearchMatch bool) string {
 	// Indentation
 	indent := strings.Repeat("  ", node.Level)
 
@@ -463,15 +736,42 @@ func (jv *JSONBViewer) renderNode(node *TreeNode, isSelected bool) string {
 			Render(": null")
 	}
 
-	line := indent + indicator + keyPart + valuePart
+	// Add search match indicator (only if not selected)
+	var searchIndicator string
+	if isSearchMatch && !isSelected {
+		searchIndicator = lipgloss.NewStyle().
+			Foreground(jv.Theme.Warning).
+			Render(" 🔍")
+	}
 
-	// Highlight selected row
+	line := indent + indicator + keyPart + valuePart + searchIndicator
+
+	// Priority 1: Highlight selected row (most prominent)
 	if isSelected {
-		return lipgloss.NewStyle().
-			Background(jv.Theme.Selection).
-			Foreground(jv.Theme.Background).
+		style := lipgloss.NewStyle().
+			Background(jv.Theme.BorderFocused). // Bright blue background
+			Foreground(jv.Theme.Background).    // Dark text for contrast
 			Bold(true).
-			Width(jv.Width - 6). // Account for container padding
+			Width(jv.Width - 6) // Account for container padding
+
+		// If selected row is also a search match, add indicator
+		if isSearchMatch {
+			matchIndicator := lipgloss.NewStyle().
+				Foreground(jv.Theme.Warning).
+				Bold(true).
+				Render(" ⭐")
+			return style.Render(line + matchIndicator)
+		}
+
+		return style.Render(line)
+	}
+
+	// Priority 2: Highlight search matches with subtle background (less prominent)
+	if isSearchMatch {
+		return lipgloss.NewStyle().
+			Background(jv.Theme.Selection). // Subtle gray background
+			Foreground(jv.Theme.Foreground).
+			Width(jv.Width - 6).
 			Render(line)
 	}
 
@@ -505,4 +805,367 @@ func (jv *JSONBViewer) renderStatus() string {
 		Foreground(jv.Theme.Metadata).
 		Italic(true).
 		Render(status)
+}
+
+// ============================================================================
+// Phase 1: Basic Navigation Methods
+// ============================================================================
+
+// pageDown scrolls down one full page
+func (jv *JSONBViewer) pageDown() {
+	contentHeight := jv.Height - 5
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+	jv.selectedIndex += contentHeight
+	if jv.selectedIndex >= len(jv.visibleNodes) {
+		jv.selectedIndex = len(jv.visibleNodes) - 1
+	}
+	jv.adjustScroll()
+}
+
+// pageUp scrolls up one full page
+func (jv *JSONBViewer) pageUp() {
+	contentHeight := jv.Height - 5
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+	jv.selectedIndex -= contentHeight
+	if jv.selectedIndex < 0 {
+		jv.selectedIndex = 0
+	}
+	jv.adjustScroll()
+}
+
+// halfPageDown scrolls down half a page
+func (jv *JSONBViewer) halfPageDown() {
+	contentHeight := jv.Height - 5
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+	jv.selectedIndex += contentHeight / 2
+	if jv.selectedIndex >= len(jv.visibleNodes) {
+		jv.selectedIndex = len(jv.visibleNodes) - 1
+	}
+	jv.adjustScroll()
+}
+
+// halfPageUp scrolls up half a page
+func (jv *JSONBViewer) halfPageUp() {
+	contentHeight := jv.Height - 5
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+	jv.selectedIndex -= contentHeight / 2
+	if jv.selectedIndex < 0 {
+		jv.selectedIndex = 0
+	}
+	jv.adjustScroll()
+}
+
+// jumpToNextSibling jumps to the next sibling node (same parent, same level)
+func (jv *JSONBViewer) jumpToNextSibling() {
+	if jv.selectedIndex >= len(jv.visibleNodes) {
+		return
+	}
+
+	currentNode := jv.visibleNodes[jv.selectedIndex]
+	currentParent := currentNode.Parent
+
+	// Find next sibling
+	for i := jv.selectedIndex + 1; i < len(jv.visibleNodes); i++ {
+		node := jv.visibleNodes[i]
+		
+		// Stop if we've gone past siblings (reached parent's sibling or higher level)
+		if node.Level < currentNode.Level {
+			break
+		}
+		
+		// Found next sibling
+		if node.Parent == currentParent && node.Level == currentNode.Level {
+			jv.selectedIndex = i
+			jv.adjustScroll()
+			return
+		}
+	}
+}
+
+// jumpToPrevSibling jumps to the previous sibling node
+func (jv *JSONBViewer) jumpToPrevSibling() {
+	if jv.selectedIndex >= len(jv.visibleNodes) || jv.selectedIndex == 0 {
+		return
+	}
+
+	currentNode := jv.visibleNodes[jv.selectedIndex]
+	currentParent := currentNode.Parent
+
+	// Find previous sibling
+	for i := jv.selectedIndex - 1; i >= 0; i-- {
+		node := jv.visibleNodes[i]
+		
+		// Stop if we've gone past siblings
+		if node.Level < currentNode.Level {
+			break
+		}
+		
+		// Found previous sibling
+		if node.Parent == currentParent && node.Level == currentNode.Level {
+			jv.selectedIndex = i
+			jv.adjustScroll()
+			return
+		}
+	}
+}
+
+// jumpToParent jumps to the parent node
+func (jv *JSONBViewer) jumpToParent() {
+	if jv.selectedIndex >= len(jv.visibleNodes) {
+		return
+	}
+
+	currentNode := jv.visibleNodes[jv.selectedIndex]
+	if currentNode.Parent == nil {
+		return // Already at root
+	}
+
+	// Find parent in visible nodes
+	for i, node := range jv.visibleNodes {
+		if node == currentNode.Parent {
+			jv.selectedIndex = i
+			jv.adjustScroll()
+			return
+		}
+	}
+}
+
+// ============================================================================
+// Phase 2: JSON-specific Navigation Methods
+// ============================================================================
+
+// jumpToNextOfType jumps to the next node of specific type
+func (jv *JSONBViewer) jumpToNextOfType(nodeType NodeType) {
+	if jv.selectedIndex >= len(jv.visibleNodes)-1 {
+		return
+	}
+
+	for i := jv.selectedIndex + 1; i < len(jv.visibleNodes); i++ {
+		if jv.visibleNodes[i].Type == nodeType {
+			jv.selectedIndex = i
+			jv.adjustScroll()
+			return
+		}
+	}
+}
+
+// jumpToPrevOfType jumps to the previous node of specific type
+func (jv *JSONBViewer) jumpToPrevOfType(nodeType NodeType) {
+	if jv.selectedIndex == 0 {
+		return
+	}
+
+	for i := jv.selectedIndex - 1; i >= 0; i-- {
+		if jv.visibleNodes[i].Type == nodeType {
+			jv.selectedIndex = i
+			jv.adjustScroll()
+			return
+		}
+	}
+}
+
+// jumpToNextArrayItem jumps to next item in the same array
+func (jv *JSONBViewer) jumpToNextArrayItem() {
+	if jv.selectedIndex >= len(jv.visibleNodes) {
+		return
+	}
+
+	currentNode := jv.visibleNodes[jv.selectedIndex]
+	
+	// Check if current node is in an array
+	if currentNode.Parent == nil || currentNode.Parent.Type != NodeArray {
+		return
+	}
+
+	// Find next sibling in the same array
+	jv.jumpToNextSibling()
+}
+
+// jumpToPrevArrayItem jumps to previous item in the same array
+func (jv *JSONBViewer) jumpToPrevArrayItem() {
+	if jv.selectedIndex >= len(jv.visibleNodes) {
+		return
+	}
+
+	currentNode := jv.visibleNodes[jv.selectedIndex]
+	
+	// Check if current node is in an array
+	if currentNode.Parent == nil || currentNode.Parent.Type != NodeArray {
+		return
+	}
+
+	// Find previous sibling in the same array
+	jv.jumpToPrevSibling()
+}
+
+// copyCurrentPath copies the JSON path of current node (placeholder - actual clipboard integration needed)
+func (jv *JSONBViewer) copyCurrentPath() {
+	if jv.selectedIndex >= len(jv.visibleNodes) {
+		return
+	}
+
+	node := jv.visibleNodes[jv.selectedIndex]
+	var pathStr string
+	if len(node.Path) > 0 {
+		pathStr = "$." + strings.Join(node.Path, ".")
+	} else {
+		pathStr = "$"
+	}
+
+	// TODO: Integrate with clipboard (e.g., using github.com/atotto/clipboard)
+	// For now, we'll store it in a field to show in status
+	fmt.Printf("Copied path: %s\n", pathStr)
+}
+
+// ============================================================================
+// Phase 3: Advanced Navigation Methods
+// ============================================================================
+
+// handleQuickJump handles mark setting and jumping
+func (jv *JSONBViewer) handleQuickJump(char string) {
+	defer func() {
+		jv.quickJumpMode = false
+		jv.quickJumpBuffer = ""
+	}()
+
+	if len(char) != 1 {
+		return
+	}
+
+	r := rune(char[0])
+	
+	// Check if it's a valid mark character (a-z)
+	if r < 'a' || r > 'z' {
+		return
+	}
+
+	if jv.quickJumpBuffer == "m" {
+		// Set mark
+		if jv.selectedIndex < len(jv.visibleNodes) {
+			jv.marks[r] = jv.visibleNodes[jv.selectedIndex]
+		}
+	} else if jv.quickJumpBuffer == "'" {
+		// Jump to mark
+		if targetNode, ok := jv.marks[r]; ok {
+			// Find the node in visible nodes
+			for i, node := range jv.visibleNodes {
+				if node == targetNode {
+					jv.selectedIndex = i
+					jv.adjustScroll()
+					return
+				}
+			}
+			// If not visible, expand path to it
+			jv.expandPathToNode(targetNode)
+			jv.rebuildVisibleNodes()
+			for i, node := range jv.visibleNodes {
+				if node == targetNode {
+					jv.selectedIndex = i
+					jv.adjustScroll()
+					return
+				}
+			}
+		}
+	}
+}
+
+// jumpToKeyStartingWith jumps to next node whose key starts with the given letter
+func (jv *JSONBViewer) jumpToKeyStartingWith(letter string) {
+	if jv.selectedIndex >= len(jv.visibleNodes)-1 {
+		// Try from beginning
+		for i := 0; i < len(jv.visibleNodes); i++ {
+			node := jv.visibleNodes[i]
+			if len(node.Key) > 0 && strings.HasPrefix(strings.ToLower(node.Key), strings.ToLower(letter)) {
+				jv.selectedIndex = i
+				jv.adjustScroll()
+				return
+			}
+		}
+		return
+	}
+
+	// Search from current position forward
+	for i := jv.selectedIndex + 1; i < len(jv.visibleNodes); i++ {
+		node := jv.visibleNodes[i]
+		if len(node.Key) > 0 && strings.HasPrefix(strings.ToLower(node.Key), strings.ToLower(letter)) {
+			jv.selectedIndex = i
+			jv.adjustScroll()
+			return
+		}
+	}
+
+	// Wrap around to beginning
+	for i := 0; i <= jv.selectedIndex; i++ {
+		node := jv.visibleNodes[i]
+		if len(node.Key) > 0 && strings.HasPrefix(strings.ToLower(node.Key), strings.ToLower(letter)) {
+			jv.selectedIndex = i
+			jv.adjustScroll()
+			return
+		}
+	}
+}
+
+// renderHelp renders the help documentation
+func (jv *JSONBViewer) renderHelp() string {
+	helpText := `
+JSONB Viewer - Keyboard Shortcuts
+
+Basic Navigation:
+  ↑/k          Move up one line
+  ↓/j          Move down one line
+  g / Home     Jump to first item
+  G / End      Jump to last item
+  Ctrl-f/PgDn  Page down
+  Ctrl-b/PgUp  Page up
+  Ctrl-d       Half page down
+  Ctrl-u       Half page up
+
+Tree Navigation:
+  Space/Enter  Expand/collapse current node
+  E            Expand all nodes
+  C            Collapse all nodes
+  J            Jump to next sibling
+  K            Jump to previous sibling
+  p            Jump to parent node
+
+JSON Type Navigation:
+  ]            Jump to next Array
+  [            Jump to previous Array
+  }            Jump to next Object
+  {            Jump to previous Object
+  "            Jump to next String value
+  #            Jump to next Number value
+  ]a           Jump to next array item
+  [a           Jump to previous array item
+
+Search:
+  /            Enter search mode
+  n            Next search result
+  N            Previous search result
+  Esc          Clear search results
+
+Advanced:
+  y            Copy JSON path (yank)
+  m{a-z}       Set mark at current position
+  '{a-z}       Jump to mark
+  a-z          Quick jump to key starting with letter
+
+Other:
+  ?            Toggle this help
+  q / Esc      Close viewer
+
+Press any key to close help...
+`
+
+	return lipgloss.NewStyle().
+		Foreground(jv.Theme.Foreground).
+		Render(helpText)
 }
