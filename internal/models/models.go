@@ -48,3 +48,39 @@ func NewAppState() AppState {
 		ViewMode:       NormalMode,
 	}
 }
+
+// ColumnDetail contains comprehensive column information for structure view
+type ColumnDetail struct {
+	Name          string
+	DataType      string
+	IsNullable    bool
+	DefaultValue  string
+	IsPrimaryKey  bool
+	IsForeignKey  bool
+	IsUnique      bool
+	HasCheck      bool
+	Comment       string
+}
+
+// Constraint represents a table constraint
+type Constraint struct {
+	Name         string
+	Type         string // 'p'=PK, 'f'=FK, 'u'=Unique, 'c'=Check
+	Columns      []string
+	Definition   string
+	ForeignTable string // For FK: "schema.table"
+	ForeignCols  []string
+}
+
+// IndexInfo represents an index
+type IndexInfo struct {
+	Name        string
+	Type        string // btree, hash, gin, gist, brin, spgist
+	Columns     []string
+	Definition  string
+	IsUnique    bool
+	IsPrimary   bool
+	IsPartial   bool
+	Size        int64
+	Predicate   string // WHERE clause for partial indexes
+}
