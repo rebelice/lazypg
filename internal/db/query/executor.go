@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -45,7 +46,7 @@ func Execute(ctx context.Context, pool *pgxpool.Pool, sql string) models.QueryRe
 			if v == nil {
 				row[i] = "NULL"
 			} else {
-				row[i] = fmt.Sprintf("%v", v)
+				row[i] = convertValueToString(v)
 			}
 		}
 		result = append(result, row)
@@ -64,5 +65,24 @@ func Execute(ctx context.Context, pool *pgxpool.Pool, sql string) models.QueryRe
 		Rows:         result,
 		RowsAffected: int64(len(result)),
 		Duration:     time.Since(start),
+	}
+}
+
+// convertValueToString converts a database value to string, handling JSONB properly
+func convertValueToString(val interface{}) string {
+	// Check if it's a map or slice (JSONB types)
+	switch v := val.(type) {
+	case map[string]interface{}, []interface{}:
+		// Convert to JSON string
+		jsonBytes, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Sprintf("%v", val)
+		}
+		return string(jsonBytes)
+	case []byte:
+		// Might be raw JSON bytes
+		return string(v)
+	default:
+		return fmt.Sprintf("%v", val)
 	}
 }
