@@ -11,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/rebeliceyang/lazypg/internal/commands"
 	"github.com/rebeliceyang/lazypg/internal/config"
 	"github.com/rebeliceyang/lazypg/internal/db/connection"
@@ -1292,21 +1293,13 @@ func (a *App) renderNormalView() string {
 		)
 	}
 
-	// Render search input if visible
+	// Render search input if visible (as overlay on top of mainView)
 	if a.showSearch {
 		a.searchInput.Width = 60
 		if a.searchInput.Width > a.state.Width-4 {
 			a.searchInput.Width = a.state.Width - 4
 		}
-		mainView = lipgloss.Place(
-			a.state.Width,
-			a.state.Height,
-			lipgloss.Center,
-			lipgloss.Center,
-			a.searchInput.View(),
-			lipgloss.WithWhitespaceChars(" "),
-			lipgloss.WithWhitespaceForeground(lipgloss.Color("#555555")),
-		)
+		mainView = a.overlaySearchInput(mainView)
 	}
 
 	return mainView
@@ -1999,6 +1992,74 @@ func (a *App) ShowError(title, message string) {
 // DismissError hides the error overlay
 func (a *App) DismissError() {
 	a.showError = false
+}
+
+// overlaySearchInput renders the search input as an overlay on top of background
+func (a *App) overlaySearchInput(background string) string {
+	searchView := a.searchInput.View()
+	searchLines := strings.Split(searchView, "\n")
+	bgLines := strings.Split(background, "\n")
+
+	// Calculate center position
+	searchHeight := len(searchLines)
+	searchWidth := lipgloss.Width(searchLines[0]) // Use first line width
+
+	startY := (a.state.Height - searchHeight) / 2
+	startX := (a.state.Width - searchWidth) / 2
+
+	if startY < 0 {
+		startY = 0
+	}
+	if startX < 0 {
+		startX = 0
+	}
+
+	// Overlay search box on background
+	result := make([]string, len(bgLines))
+	for i, bgLine := range bgLines {
+		if i >= startY && i < startY+searchHeight {
+			searchLineIdx := i - startY
+			if searchLineIdx < len(searchLines) {
+				// Overlay this search line onto background
+				result[i] = a.overlayLine(bgLine, searchLines[searchLineIdx], startX)
+			} else {
+				result[i] = bgLine
+			}
+		} else {
+			result[i] = bgLine
+		}
+	}
+
+	return strings.Join(result, "\n")
+}
+
+// overlayLine overlays foreground onto background at given x position
+// Handles ANSI escape sequences correctly
+func (a *App) overlayLine(background, foreground string, startX int) string {
+	fgWidth := ansi.StringWidth(foreground)
+
+	// Truncate background to startX (visual width)
+	leftPart := ansi.Truncate(background, startX, "")
+
+	// Get visible width of left part
+	leftWidth := ansi.StringWidth(leftPart)
+
+	// Pad if needed
+	if leftWidth < startX {
+		leftPart += strings.Repeat(" ", startX-leftWidth)
+	}
+
+	// Cut the right part of background after the overlay
+	rightStart := startX + fgWidth
+	bgWidth := ansi.StringWidth(background)
+
+	var rightPart string
+	if rightStart < bgWidth {
+		// Cut from background starting at rightStart position
+		rightPart = ansi.Cut(background, rightStart, bgWidth)
+	}
+
+	return leftPart + foreground + rightPart
 }
 
 // SearchTableResultMsg is sent when table search completes
