@@ -53,12 +53,15 @@ func GetDataViewKeys() []KeyBinding {
 		{"f", "Open filter builder"},
 		{"Ctrl+F", "Quick filter from cell"},
 		{"Ctrl+R", "Clear filter"},
-		{"j", "Open JSONB viewer (on JSONB cell)"},
-		{"c", "Copy cell"},
-		{"Shift+C", "Copy row"},
-		{"e", "Edit cell"},
-		{"s", "Sort ascending"},
-		{"Shift+S", "Sort descending"},
+		{"J", "Open JSONB viewer (on JSONB cell)"},
+		{"s", "Toggle sort on column (ASC/DESC)"},
+		{"S", "Toggle NULLS FIRST/LAST"},
+		{"h/l", "Move column left/right"},
+		{"H/L", "Jump scroll half screen"},
+		{"0", "Jump to first column"},
+		{"$", "Jump to last column"},
+		{"/", "Open search (Tab to toggle mode)"},
+		{"n/N", "Next/Previous search match"},
 	}
 }
 

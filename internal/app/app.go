@@ -88,6 +88,10 @@ type App struct {
 
 	// Connection history
 	connectionHistory *connection_history.Manager
+
+	// Search input
+	showSearch  bool
+	searchInput *components.SearchInput
 }
 
 // DiscoveryCompleteMsg is sent when discovery completes
@@ -112,10 +116,13 @@ type TreeLoadedMsg struct {
 
 // LoadTableDataMsg requests loading table data
 type LoadTableDataMsg struct {
-	Schema string
-	Table  string
-	Offset int
-	Limit  int
+	Schema     string
+	Table      string
+	Offset     int
+	Limit      int
+	SortColumn string
+	SortDir    string
+	NullsFirst bool
 }
 
 // TableDataLoadedMsg is sent when table data is loaded
@@ -201,6 +208,9 @@ func New(cfg *config.Config) *App {
 	// Initialize favorites dialog
 	favoritesDialog := components.NewFavoritesDialog(th)
 
+	// Initialize search input
+	searchInput := components.NewSearchInput(th)
+
 	app := &App{
 		state:             state,
 		config:            cfg,
@@ -227,6 +237,8 @@ func New(cfg *config.Config) *App {
 		favoritesManager:  favoritesManager,
 		favoritesDialog:   favoritesDialog,
 		connectionHistory: connectionHistory,
+		showSearch:        false,
+		searchInput:       searchInput,
 		leftPanel: components.Panel{
 			Title:   "Navigation",
 			Content: "Databases\n└─ (empty)",
@@ -466,6 +478,66 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.showFavorites = false
 		return a, nil
 
+	case components.SearchInputMsg:
+		// Handle search request from search input
+		a.showSearch = false
+		if msg.Query == "" {
+			return a, nil
+		}
+
+		if msg.Mode == "local" {
+			// Local search - search only loaded data
+			a.tableView.SearchLocal(msg.Query)
+		} else {
+			// Table search - query the database
+			if a.state.ActiveConnection == nil {
+				a.ShowError("No Connection", "Please connect to a database first")
+				return a, nil
+			}
+
+			if a.currentTable == "" {
+				a.ShowError("No Table", "Please select a table first")
+				return a, nil
+			}
+
+			// Execute table search
+			return a, a.searchTable(msg.Query)
+		}
+		return a, nil
+
+	case components.CloseSearchMsg:
+		a.showSearch = false
+		a.searchInput.Reset()
+		return a, nil
+
+	case SearchTableResultMsg:
+		if msg.Err != nil {
+			a.ShowError("Search Error", msg.Err.Error())
+			return a, nil
+		}
+
+		if msg.Data == nil || len(msg.Data.Rows) == 0 {
+			a.ShowError("No Results", fmt.Sprintf("No matches found for '%s'", msg.Query))
+			return a, nil
+		}
+
+		// Replace table data with search results
+		a.tableView.SetData(msg.Data.Columns, msg.Data.Rows, int(msg.Data.TotalRows))
+
+		// Build matches from all cells that contain the query
+		queryLower := strings.ToLower(msg.Query)
+		var matches []components.MatchPos
+		for rowIdx, row := range msg.Data.Rows {
+			for colIdx, cell := range row {
+				if strings.Contains(strings.ToLower(cell), queryLower) {
+					matches = append(matches, components.MatchPos{Row: rowIdx, Col: colIdx})
+				}
+			}
+		}
+
+		a.tableView.SetSearchResults(msg.Query, matches)
+		return a, nil
+
 	case components.AddFavoriteMsg:
 		if a.favoritesManager != nil {
 			conn := ""
@@ -570,6 +642,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle favorites dialog if visible
 		if a.showFavorites {
 			return a.handleFavoritesDialog(msg)
+		}
+
+		// Handle search input if visible
+		if a.showSearch {
+			return a.handleSearchInput(msg)
 		}
 
 		switch msg.String() {
@@ -781,11 +858,71 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case "right", "l":
 					a.tableView.MoveSelectionHorizontal(1)
 					return a, nil
+				case "H":
+					// Jump scroll left (half screen)
+					a.tableView.JumpScrollHorizontal(-1)
+					return a, nil
+				case "L":
+					// Jump scroll right (half screen)
+					a.tableView.JumpScrollHorizontal(1)
+					return a, nil
+				case "0":
+					// Jump to first column
+					a.tableView.JumpToFirstColumn()
+					return a, nil
+				case "$":
+					// Jump to last column
+					a.tableView.JumpToLastColumn()
+					return a, nil
 				case "ctrl+u":
 					a.tableView.PageUp()
 					return a, nil
 				case "ctrl+d":
 					a.tableView.PageDown()
+					return a, nil
+				case "s":
+					// Sort by current column
+					a.tableView.ToggleSort()
+					// Reload data with new sort
+					if a.currentTable != "" {
+						parts := strings.Split(a.currentTable, ".")
+						if len(parts) == 2 {
+							return a, func() tea.Msg {
+								return LoadTableDataMsg{
+									Schema:     parts[0],
+									Table:      parts[1],
+									Offset:     0,
+									Limit:      100,
+									SortColumn: a.tableView.GetSortColumn(),
+									SortDir:    a.tableView.GetSortDirection(),
+									NullsFirst: a.tableView.GetNullsFirst(),
+								}
+							}
+						}
+					}
+					return a, nil
+				case "S":
+					// Toggle NULLS FIRST/LAST
+					if a.tableView.SortColumn >= 0 {
+						a.tableView.ToggleNullsFirst()
+						// Reload data
+						if a.currentTable != "" {
+							parts := strings.Split(a.currentTable, ".")
+							if len(parts) == 2 {
+								return a, func() tea.Msg {
+									return LoadTableDataMsg{
+										Schema:     parts[0],
+										Table:      parts[1],
+										Offset:     0,
+										Limit:      100,
+										SortColumn: a.tableView.GetSortColumn(),
+										SortDir:    a.tableView.GetSortDirection(),
+										NullsFirst: a.tableView.GetNullsFirst(),
+									}
+								}
+							}
+						}
+					}
 					return a, nil
 				case "J":
 					// Open JSONB viewer if cell contains JSONB (uppercase J to avoid conflict with vim down)
@@ -797,6 +934,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 								a.showJSONBViewer = true
 							}
 						}
+					}
+					return a, nil
+				case "/":
+					// Open search input
+					a.searchInput.Reset()
+					a.searchInput.Width = a.rightPanel.Width - 4
+					a.showSearch = true
+					return a, nil
+				case "n":
+					// Next search match
+					if a.tableView.SearchActive {
+						a.tableView.NextMatch()
+					}
+					return a, nil
+				case "N":
+					// Previous search match
+					if a.tableView.SearchActive {
+						a.tableView.PrevMatch()
 					}
 					return a, nil
 				case "enter", " ":
@@ -1132,6 +1287,23 @@ func (a *App) renderNormalView() string {
 			lipgloss.Center,
 			lipgloss.Center,
 			a.favoritesDialog.View(),
+			lipgloss.WithWhitespaceChars(" "),
+			lipgloss.WithWhitespaceForeground(lipgloss.Color("#555555")),
+		)
+	}
+
+	// Render search input if visible
+	if a.showSearch {
+		a.searchInput.Width = 60
+		if a.searchInput.Width > a.state.Width-4 {
+			a.searchInput.Width = a.state.Width - 4
+		}
+		mainView = lipgloss.Place(
+			a.state.Width,
+			a.state.Height,
+			lipgloss.Center,
+			lipgloss.Center,
+			a.searchInput.View(),
 			lipgloss.WithWhitespaceChars(" "),
 			lipgloss.WithWhitespaceForeground(lipgloss.Color("#555555")),
 		)
@@ -1589,6 +1761,13 @@ func (a *App) handleFavoritesDialog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return a, cmd
 }
 
+// handleSearchInput handles key events when search input is visible
+func (a *App) handleSearchInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	a.searchInput, cmd = a.searchInput.Update(msg)
+	return a, cmd
+}
+
 // getTableColumns returns column info for the current table
 func (a *App) getTableColumns() []models.ColumnInfo {
 	if a.state.TreeSelected == nil || a.state.TreeSelected.Type != models.TreeNodeTypeTable {
@@ -1724,7 +1903,16 @@ func (a *App) loadTableData(msg LoadTableDataMsg) tea.Cmd {
 			return TableDataLoadedMsg{Err: fmt.Errorf("no active connection: %w", err)}
 		}
 
-		data, err := metadata.QueryTableData(ctx, conn.Pool, msg.Schema, msg.Table, msg.Offset, msg.Limit)
+		var sort *metadata.SortOptions
+		if msg.SortColumn != "" {
+			sort = &metadata.SortOptions{
+				Column:     msg.SortColumn,
+				Direction:  msg.SortDir,
+				NullsFirst: msg.NullsFirst,
+			}
+		}
+
+		data, err := metadata.QueryTableData(ctx, conn.Pool, msg.Schema, msg.Table, msg.Offset, msg.Limit, sort)
 		if err != nil {
 			return TableDataLoadedMsg{Err: err}
 		}
@@ -1811,4 +1999,43 @@ func (a *App) ShowError(title, message string) {
 // DismissError hides the error overlay
 func (a *App) DismissError() {
 	a.showError = false
+}
+
+// SearchTableResultMsg is sent when table search completes
+type SearchTableResultMsg struct {
+	Query   string
+	Data    *metadata.TableData
+	Err     error
+}
+
+// searchTable executes a table-wide search
+func (a *App) searchTable(query string) tea.Cmd {
+	return func() tea.Msg {
+		conn, err := a.connectionManager.GetActive()
+		if err != nil {
+			return SearchTableResultMsg{Query: query, Err: fmt.Errorf("no active connection: %w", err)}
+		}
+
+		parts := strings.Split(a.currentTable, ".")
+		if len(parts) != 2 {
+			return SearchTableResultMsg{Query: query, Err: fmt.Errorf("invalid table: %s", a.currentTable)}
+		}
+
+		schema, table := parts[0], parts[1]
+
+		data, err := metadata.SearchTableData(
+			context.Background(),
+			conn.Pool,
+			schema,
+			table,
+			a.tableView.Columns,
+			query,
+			500, // Max results
+		)
+		if err != nil {
+			return SearchTableResultMsg{Query: query, Err: err}
+		}
+
+		return SearchTableResultMsg{Query: query, Data: data}
+	}
 }

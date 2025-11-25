@@ -28,15 +28,40 @@ type TableView struct {
 
 	// Column widths (calculated)
 	ColumnWidths []int
+
+	// Sort state
+	SortColumn    int    // -1 means no sort, otherwise index of sorted column
+	SortDirection string // "ASC" or "DESC"
+	NullsFirst    bool   // true = NULLS FIRST, false = NULLS LAST (default)
+
+	// Horizontal scrolling state
+	LeftColOffset int // First visible column index
+	VisibleCols   int // Number of columns that fit in current width
+
+	// Search state
+	SearchActive bool
+	SearchMode   string     // "local" or "table"
+	SearchQuery  string
+	Matches      []MatchPos // List of match positions
+	CurrentMatch int        // Index in Matches
+}
+
+// MatchPos represents a search match position
+type MatchPos struct {
+	Row int
+	Col int
 }
 
 // NewTableView creates a new table view with theme
 func NewTableView(th theme.Theme) *TableView {
 	return &TableView{
-		Columns:      []string{},
-		Rows:         [][]string{},
-		ColumnWidths: []int{},
-		Theme:        th,
+		Columns:       []string{},
+		Rows:          [][]string{},
+		ColumnWidths:  []int{},
+		Theme:         th,
+		SortColumn:    -1,
+		SortDirection: "ASC",
+		NullsFirst:    false,
 	}
 }
 
@@ -57,25 +82,12 @@ func (tv *TableView) calculateColumnWidths() {
 	numColumns := len(tv.Columns)
 	tv.ColumnWidths = make([]int, numColumns)
 
-	// Calculate separator space: 3 chars (" │ ") * (numColumns - 1)
-	separatorWidth := 0
-	if numColumns > 1 {
-		separatorWidth = 3 * (numColumns - 1)
-	}
-
-	// Available width for actual column content
-	availableWidth := tv.Width - separatorWidth
-	if availableWidth < numColumns*10 {
-		// Minimum 10 chars per column
-		availableWidth = numColumns * 10
-	}
-
 	// Step 1: Calculate desired widths based on content
 	desiredWidths := make([]int, numColumns)
 
-	// Start with column header lengths
+	// Start with column header lengths (add 4 chars for sort indicator space)
 	for i, col := range tv.Columns {
-		desiredWidths[i] = runewidth.StringWidth(col)
+		desiredWidths[i] = runewidth.StringWidth(col) + 4
 	}
 
 	// Check row data
@@ -90,51 +102,52 @@ func (tv *TableView) calculateColumnWidths() {
 		}
 	}
 
-	// Step 2: Apply constraints and distribute available width
+	// Step 2: Apply constraints (min/max width per column)
 	maxWidth := 50
 	minWidth := 10
 
-	// Calculate total desired width
-	totalDesired := 0
-	for _, w := range desiredWidths {
+	for i, w := range desiredWidths {
 		if w > maxWidth {
 			w = maxWidth
 		}
 		if w < minWidth {
 			w = minWidth
 		}
-		totalDesired += w
+		tv.ColumnWidths[i] = w
+	}
+}
+
+// calculateVisibleCols calculates how many columns fit in the current width
+func (tv *TableView) calculateVisibleCols() {
+	if len(tv.ColumnWidths) == 0 {
+		tv.VisibleCols = 0
+		return
 	}
 
-	// Step 3: Distribute width proportionally if we exceed available width
-	if totalDesired > availableWidth {
-		// Scale down proportionally
-		scale := float64(availableWidth) / float64(totalDesired)
-		for i := range desiredWidths {
-			w := desiredWidths[i]
-			if w > maxWidth {
-				w = maxWidth
-			}
-			if w < minWidth {
-				w = minWidth
-			}
-			tv.ColumnWidths[i] = int(float64(w) * scale)
-			if tv.ColumnWidths[i] < minWidth {
-				tv.ColumnWidths[i] = minWidth
-			}
+	// Reserve space for edge indicators (2 chars each side)
+	availableWidth := tv.Width - 4
+
+	// Count columns that fit starting from LeftColOffset
+	totalWidth := 0
+	count := 0
+	for i := tv.LeftColOffset; i < len(tv.ColumnWidths); i++ {
+		colWidth := tv.ColumnWidths[i]
+		separatorWidth := 0
+		if count > 0 {
+			separatorWidth = 3 // " │ "
 		}
-	} else {
-		// Use desired widths with constraints
-		for i, w := range desiredWidths {
-			if w > maxWidth {
-				w = maxWidth
-			}
-			if w < minWidth {
-				w = minWidth
-			}
-			tv.ColumnWidths[i] = w
+
+		if totalWidth+colWidth+separatorWidth > availableWidth {
+			break
 		}
+		totalWidth += colWidth + separatorWidth
+		count++
 	}
+
+	if count < 1 && len(tv.ColumnWidths) > 0 {
+		count = 1 // Always show at least one column
+	}
+	tv.VisibleCols = count
 }
 
 // View renders the table
@@ -143,12 +156,31 @@ func (tv *TableView) View() string {
 		return tv.Style.Render("No data")
 	}
 
+	// Calculate visible columns for horizontal scrolling
+	tv.calculateVisibleCols()
+
 	var b strings.Builder
 
-	// Render header
+	// Determine edge indicators
+	leftIndicator := "  " // 2 spaces placeholder
+	if tv.LeftColOffset > 0 {
+		leftIndicator = "◀ "
+	}
+	rightIndicator := "  "
+	if tv.LeftColOffset+tv.VisibleCols < len(tv.Columns) {
+		rightIndicator = " ▶"
+	}
+
+	// Render header with indicators
+	b.WriteString(leftIndicator)
 	b.WriteString(tv.renderHeader())
+	b.WriteString(rightIndicator)
 	b.WriteString("\n")
+
+	// Render separator
+	b.WriteString("  ") // Align with left indicator
 	b.WriteString(tv.renderSeparator())
+	b.WriteString("  ")
 	b.WriteString("\n")
 
 	// Calculate how many rows we can show
@@ -167,7 +199,9 @@ func (tv *TableView) View() string {
 
 	for i := tv.TopRow; i < endRow; i++ {
 		isSelected := i == tv.SelectedRow
-		b.WriteString(tv.renderRow(tv.Rows[i], isSelected))
+		b.WriteString("  ") // Align with left indicator
+		b.WriteString(tv.renderRow(tv.Rows[i], isSelected, i))
+		b.WriteString("  ")
 		if i < endRow-1 {
 			b.WriteString("\n")
 		}
@@ -181,7 +215,7 @@ func (tv *TableView) View() string {
 }
 
 func (tv *TableView) renderHeader() string {
-	s := make([]string, 0, len(tv.Columns)*2-1) // Account for separators
+	s := make([]string, 0, tv.VisibleCols*2-1) // Account for separators
 
 	// Create separator style
 	separatorStyle := lipgloss.NewStyle().
@@ -189,14 +223,39 @@ func (tv *TableView) renderHeader() string {
 		Background(tv.Theme.Selection)
 	separator := separatorStyle.Render(" │ ")
 
-	for i, col := range tv.Columns {
+	// Only render visible columns
+	endCol := tv.LeftColOffset + tv.VisibleCols
+	if endCol > len(tv.Columns) {
+		endCol = len(tv.Columns)
+	}
+
+	for idx, i := 0, tv.LeftColOffset; i < endCol; i, idx = i+1, idx+1 {
+		col := tv.Columns[i]
 		width := tv.ColumnWidths[i]
 		if width <= 0 {
 			continue
 		}
 
+		// Add sort indicator if this column is sorted
+		displayCol := col
+		if i == tv.SortColumn {
+			if tv.SortDirection == "ASC" {
+				if tv.NullsFirst {
+					displayCol = col + " ↑ⁿ"
+				} else {
+					displayCol = col + " ↑"
+				}
+			} else {
+				if tv.NullsFirst {
+					displayCol = col + " ↓ⁿ"
+				} else {
+					displayCol = col + " ↓"
+				}
+			}
+		}
+
 		// Use runewidth.Truncate for proper truncation
-		truncated := runewidth.Truncate(col, width, "…")
+		truncated := runewidth.Truncate(displayCol, width, "…")
 
 		// Create cell width style
 		widthStyle := lipgloss.NewStyle().
@@ -212,8 +271,8 @@ func (tv *TableView) renderHeader() string {
 		renderedCell := headerCellStyle.Render(widthStyle.Render(truncated))
 		s = append(s, renderedCell)
 
-		// Add separator between columns (but not after the last column)
-		if i < len(tv.Columns)-1 {
+		// Add separator between columns (but not after the last visible column)
+		if i < endCol-1 {
 			s = append(s, separator)
 		}
 	}
@@ -230,16 +289,21 @@ func (tv *TableView) renderHeader() string {
 }
 
 func (tv *TableView) renderSeparator() string {
-	// Calculate total width of all columns
+	// Calculate total width of visible columns only
 	totalWidth := 0
-	for _, width := range tv.ColumnWidths {
-		totalWidth += width
+	endCol := tv.LeftColOffset + tv.VisibleCols
+	if endCol > len(tv.ColumnWidths) {
+		endCol = len(tv.ColumnWidths)
+	}
+
+	for i := tv.LeftColOffset; i < endCol; i++ {
+		totalWidth += tv.ColumnWidths[i]
 	}
 
 	// Add width for separators: 3 chars (" │ ") * (number of separators)
-	// Number of separators = number of columns - 1
-	if len(tv.ColumnWidths) > 1 {
-		totalWidth += 3 * (len(tv.ColumnWidths) - 1)
+	visibleCount := endCol - tv.LeftColOffset
+	if visibleCount > 1 {
+		totalWidth += 3 * (visibleCount - 1)
 	}
 
 	// Create a simple horizontal line
@@ -249,22 +313,30 @@ func (tv *TableView) renderSeparator() string {
 	return separatorStyle.Render(strings.Repeat("─", totalWidth))
 }
 
-func (tv *TableView) renderRow(row []string, selected bool) string {
-	s := make([]string, 0, len(row)*2-1) // Account for separators
+func (tv *TableView) renderRow(row []string, selected bool, rowIndex int) string {
+	s := make([]string, 0, tv.VisibleCols*2-1) // Account for separators
 
 	// Create separator style (always uses border color, no background)
 	separatorStyle := lipgloss.NewStyle().
 		Foreground(tv.Theme.Border)
 	separator := separatorStyle.Render(" │ ")
 
-	for i, value := range row {
-		if i >= len(tv.ColumnWidths) {
+	// Only render visible columns
+	endCol := tv.LeftColOffset + tv.VisibleCols
+	if endCol > len(tv.ColumnWidths) {
+		endCol = len(tv.ColumnWidths)
+	}
+
+	for i := tv.LeftColOffset; i < endCol; i++ {
+		if i >= len(row) || i >= len(tv.ColumnWidths) {
 			break
 		}
 		width := tv.ColumnWidths[i]
 		if width <= 0 {
 			continue
 		}
+
+		value := row[i]
 
 		// Check if this looks like JSONB and format for display
 		cellValue := value
@@ -281,9 +353,20 @@ func (tv *TableView) renderRow(row []string, selected bool) string {
 			MaxWidth(width).
 			Inline(true)
 
-		// Determine cell background based on selection
+		// Determine cell background based on selection and search
 		var cellStyle lipgloss.Style
-		if selected && i == tv.SelectedCol {
+		if tv.IsCurrentMatch(rowIndex, i) {
+			// Current search match - bright yellow highlight
+			cellStyle = lipgloss.NewStyle().
+				Background(lipgloss.Color("#f9e2af")). // Yellow
+				Foreground(lipgloss.Color("#1e1e2e")). // Dark
+				Bold(true)
+		} else if tv.IsMatch(rowIndex, i) {
+			// Other search match - subtle highlight
+			cellStyle = lipgloss.NewStyle().
+				Background(lipgloss.Color("#585b70")). // Surface2
+				Foreground(tv.Theme.Foreground)
+		} else if selected && i == tv.SelectedCol {
 			// Selected cell - bright highlight
 			cellStyle = lipgloss.NewStyle().
 				Background(tv.Theme.BorderFocused).
@@ -303,8 +386,8 @@ func (tv *TableView) renderRow(row []string, selected bool) string {
 		renderedCell := cellStyle.Render(widthStyle.Render(truncated))
 		s = append(s, renderedCell)
 
-		// Add separator between columns (but not after the last column)
-		if i < len(row)-1 && i < len(tv.ColumnWidths)-1 {
+		// Add separator between columns (but not after the last visible column)
+		if i < endCol-1 {
 			s = append(s, separator)
 		}
 	}
@@ -321,7 +404,23 @@ func (tv *TableView) renderStatus() string {
 		endRow = tv.TotalRows
 	}
 
-	showing := fmt.Sprintf(" 󰈙 %d-%d of %d rows", tv.TopRow+1, endRow, tv.TotalRows)
+	// Search match info
+	matchInfo := ""
+	if tv.SearchActive && len(tv.Matches) > 0 {
+		matchInfo = fmt.Sprintf("Match %d of %d │ ", tv.CurrentMatch+1, len(tv.Matches))
+	}
+
+	// Column info for horizontal scrolling
+	colInfo := ""
+	if len(tv.Columns) > tv.VisibleCols {
+		endCol := tv.LeftColOffset + tv.VisibleCols
+		if endCol > len(tv.Columns) {
+			endCol = len(tv.Columns)
+		}
+		colInfo = fmt.Sprintf("Cols %d-%d of %d │ ", tv.LeftColOffset+1, endCol, len(tv.Columns))
+	}
+
+	showing := fmt.Sprintf(" 󰈙 %s%s%d-%d of %d rows", matchInfo, colInfo, tv.TopRow+1, endRow, tv.TotalRows)
 	return lipgloss.NewStyle().
 		Foreground(tv.Theme.Metadata).
 		Italic(true).
@@ -384,7 +483,7 @@ func (tv *TableView) GetSelectedCell() (row int, col int) {
 	return tv.SelectedRow, tv.SelectedCol
 }
 
-// MoveSelectionHorizontal moves the selected column left or right
+// MoveSelectionHorizontal moves the selected column left or right with auto-scroll
 func (tv *TableView) MoveSelectionHorizontal(delta int) {
 	tv.SelectedCol += delta
 
@@ -395,4 +494,232 @@ func (tv *TableView) MoveSelectionHorizontal(delta int) {
 	if tv.SelectedCol >= len(tv.Columns) {
 		tv.SelectedCol = len(tv.Columns) - 1
 	}
+
+	// Auto-scroll to keep selected column visible
+	if tv.SelectedCol < tv.LeftColOffset {
+		tv.LeftColOffset = tv.SelectedCol
+	}
+	if tv.SelectedCol >= tv.LeftColOffset+tv.VisibleCols {
+		tv.LeftColOffset = tv.SelectedCol - tv.VisibleCols + 1
+	}
+
+	// Bounds check LeftColOffset
+	if tv.LeftColOffset < 0 {
+		tv.LeftColOffset = 0
+	}
+	maxOffset := len(tv.Columns) - tv.VisibleCols
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if tv.LeftColOffset > maxOffset {
+		tv.LeftColOffset = maxOffset
+	}
+}
+
+// JumpScrollHorizontal scrolls horizontally by half the visible columns
+func (tv *TableView) JumpScrollHorizontal(delta int) {
+	jumpAmount := tv.VisibleCols / 2
+	if jumpAmount < 1 {
+		jumpAmount = 1
+	}
+
+	tv.SelectedCol += delta * jumpAmount
+
+	// Bounds checking
+	if tv.SelectedCol < 0 {
+		tv.SelectedCol = 0
+	}
+	if tv.SelectedCol >= len(tv.Columns) {
+		tv.SelectedCol = len(tv.Columns) - 1
+	}
+
+	// Update scroll position via MoveSelectionHorizontal's auto-scroll
+	tv.MoveSelectionHorizontal(0)
+}
+
+// JumpToFirstColumn jumps to the first column
+func (tv *TableView) JumpToFirstColumn() {
+	tv.SelectedCol = 0
+	tv.LeftColOffset = 0
+}
+
+// JumpToLastColumn jumps to the last column
+func (tv *TableView) JumpToLastColumn() {
+	if len(tv.Columns) > 0 {
+		tv.SelectedCol = len(tv.Columns) - 1
+		// Scroll to show last column
+		maxOffset := len(tv.Columns) - tv.VisibleCols
+		if maxOffset < 0 {
+			maxOffset = 0
+		}
+		tv.LeftColOffset = maxOffset
+	}
+}
+
+// ToggleSort toggles sorting on the currently selected column
+func (tv *TableView) ToggleSort() {
+	if tv.SortColumn == tv.SelectedCol {
+		// Same column - toggle direction
+		if tv.SortDirection == "ASC" {
+			tv.SortDirection = "DESC"
+		} else {
+			tv.SortDirection = "ASC"
+		}
+	} else {
+		// New column - start with ASC
+		tv.SortColumn = tv.SelectedCol
+		tv.SortDirection = "ASC"
+	}
+}
+
+// ToggleNullsFirst toggles NULLS FIRST/LAST for current sort
+func (tv *TableView) ToggleNullsFirst() {
+	tv.NullsFirst = !tv.NullsFirst
+}
+
+// GetSortColumn returns the current sort column name, or empty string if no sort
+func (tv *TableView) GetSortColumn() string {
+	if tv.SortColumn < 0 || tv.SortColumn >= len(tv.Columns) {
+		return ""
+	}
+	return tv.Columns[tv.SortColumn]
+}
+
+// GetSortDirection returns the current sort direction
+func (tv *TableView) GetSortDirection() string {
+	return tv.SortDirection
+}
+
+// GetNullsFirst returns whether NULLS FIRST is enabled
+func (tv *TableView) GetNullsFirst() bool {
+	return tv.NullsFirst
+}
+
+// ClearSort clears the current sort
+func (tv *TableView) ClearSort() {
+	tv.SortColumn = -1
+	tv.SortDirection = "ASC"
+	tv.NullsFirst = false
+}
+
+// SearchLocal searches only loaded data
+func (tv *TableView) SearchLocal(query string) {
+	tv.SearchQuery = query
+	tv.SearchMode = "local"
+	tv.Matches = nil
+	tv.CurrentMatch = 0
+
+	if query == "" {
+		tv.SearchActive = false
+		return
+	}
+
+	tv.SearchActive = true
+	queryLower := strings.ToLower(query)
+
+	for rowIdx, row := range tv.Rows {
+		for colIdx, cell := range row {
+			if strings.Contains(strings.ToLower(cell), queryLower) {
+				tv.Matches = append(tv.Matches, MatchPos{Row: rowIdx, Col: colIdx})
+			}
+		}
+	}
+
+	if len(tv.Matches) > 0 {
+		tv.jumpToMatch(0)
+	}
+}
+
+// SetSearchResults sets search results from table search
+func (tv *TableView) SetSearchResults(query string, matches []MatchPos) {
+	tv.SearchQuery = query
+	tv.SearchMode = "table"
+	tv.Matches = matches
+	tv.CurrentMatch = 0
+	tv.SearchActive = len(matches) > 0
+
+	if len(matches) > 0 {
+		tv.jumpToMatch(0)
+	}
+}
+
+// jumpToMatch jumps to match at given index
+func (tv *TableView) jumpToMatch(idx int) {
+	if idx < 0 || idx >= len(tv.Matches) {
+		return
+	}
+
+	tv.CurrentMatch = idx
+	match := tv.Matches[idx]
+
+	// Move selection to match
+	tv.SelectedRow = match.Row
+	tv.SelectedCol = match.Col
+
+	// Scroll to show match (vertical)
+	if tv.SelectedRow < tv.TopRow {
+		tv.TopRow = tv.SelectedRow
+	}
+	if tv.SelectedRow >= tv.TopRow+tv.VisibleRows {
+		tv.TopRow = tv.SelectedRow - tv.VisibleRows + 1
+	}
+
+	// Horizontal scroll via MoveSelectionHorizontal's auto-scroll
+	tv.MoveSelectionHorizontal(0)
+}
+
+// NextMatch jumps to next match
+func (tv *TableView) NextMatch() {
+	if len(tv.Matches) == 0 {
+		return
+	}
+	nextIdx := (tv.CurrentMatch + 1) % len(tv.Matches)
+	tv.jumpToMatch(nextIdx)
+}
+
+// PrevMatch jumps to previous match
+func (tv *TableView) PrevMatch() {
+	if len(tv.Matches) == 0 {
+		return
+	}
+	prevIdx := tv.CurrentMatch - 1
+	if prevIdx < 0 {
+		prevIdx = len(tv.Matches) - 1
+	}
+	tv.jumpToMatch(prevIdx)
+}
+
+// ClearSearch clears search state
+func (tv *TableView) ClearSearch() {
+	tv.SearchActive = false
+	tv.SearchQuery = ""
+	tv.Matches = nil
+	tv.CurrentMatch = 0
+}
+
+// IsMatch checks if a cell is a match
+func (tv *TableView) IsMatch(row, col int) bool {
+	for _, m := range tv.Matches {
+		if m.Row == row && m.Col == col {
+			return true
+		}
+	}
+	return false
+}
+
+// IsCurrentMatch checks if a cell is the current match
+func (tv *TableView) IsCurrentMatch(row, col int) bool {
+	if tv.CurrentMatch < 0 || tv.CurrentMatch >= len(tv.Matches) {
+		return false
+	}
+	m := tv.Matches[tv.CurrentMatch]
+	return m.Row == row && m.Col == col
+}
+
+// GetMatchInfo returns current match info for status bar
+func (tv *TableView) GetMatchInfo() (current int, total int) {
+	if !tv.SearchActive || len(tv.Matches) == 0 {
+		return 0, 0
+	}
+	return tv.CurrentMatch + 1, len(tv.Matches)
 }
