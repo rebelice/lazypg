@@ -354,8 +354,15 @@ func (tv *TableView) renderRow(row []string, selected bool, rowIndex int) string
 			Inline(true)
 
 		// Determine cell background based on selection and search
+		// Priority: selected cell > current match > other matches > selected row > normal
 		var cellStyle lipgloss.Style
-		if tv.IsCurrentMatch(rowIndex, i) {
+		if selected && i == tv.SelectedCol {
+			// Selected cell - highest priority, bright highlight
+			cellStyle = lipgloss.NewStyle().
+				Background(tv.Theme.BorderFocused).
+				Foreground(tv.Theme.Background).
+				Bold(true)
+		} else if tv.IsCurrentMatch(rowIndex, i) {
 			// Current search match - bright yellow highlight
 			cellStyle = lipgloss.NewStyle().
 				Background(lipgloss.Color("#f9e2af")). // Yellow
@@ -366,12 +373,6 @@ func (tv *TableView) renderRow(row []string, selected bool, rowIndex int) string
 			cellStyle = lipgloss.NewStyle().
 				Background(lipgloss.Color("#585b70")). // Surface2
 				Foreground(tv.Theme.Foreground)
-		} else if selected && i == tv.SelectedCol {
-			// Selected cell - bright highlight
-			cellStyle = lipgloss.NewStyle().
-				Background(tv.Theme.BorderFocused).
-				Foreground(tv.Theme.Background).
-				Bold(true)
 		} else if selected {
 			// Selected row but not selected column - dim highlight
 			cellStyle = lipgloss.NewStyle().
