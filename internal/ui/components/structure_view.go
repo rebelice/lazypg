@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/rebeliceyang/lazypg/internal/db/connection"
 	"github.com/rebeliceyang/lazypg/internal/db/metadata"
+	"github.com/rebeliceyang/lazypg/internal/models"
 	"github.com/rebeliceyang/lazypg/internal/ui/theme"
 )
 
@@ -22,11 +23,16 @@ type StructureView struct {
 	// Current active tab (0=Data, 1=Columns, 2=Constraints, 3=Indexes)
 	activeTab int
 
-	// Tab views
-	tableView       *TableView      // For Data tab
-	columnsView     *ColumnsView
-	constraintsView *ConstraintsView
-	indexesView     *IndexesView
+	// Tab views - all using TableView for consistent UI
+	tableView       *TableView // For Data tab
+	columnsTable    *TableView // For Columns tab
+	constraintsTable *TableView // For Constraints tab
+	indexesTable    *TableView // For Indexes tab
+
+	// Raw data for copy operations
+	columnsData     []models.ColumnDetail
+	constraintsData []models.Constraint
+	indexesData     []models.IndexInfo
 
 	// Table info
 	schema string
@@ -41,12 +47,12 @@ type StructureView struct {
 // NewStructureView creates a new structure view
 func NewStructureView(th theme.Theme, tableView *TableView) *StructureView {
 	return &StructureView{
-		Theme:           th,
-		activeTab:       0, // Start with Data tab
-		tableView:       tableView,
-		columnsView:     NewColumnsView(th),
-		constraintsView: NewConstraintsView(th),
-		indexesView:     NewIndexesView(th),
+		Theme:            th,
+		activeTab:        0, // Start with Data tab
+		tableView:        tableView,
+		columnsTable:     NewTableView(th),
+		constraintsTable: NewTableView(th),
+		indexesTable:     NewTableView(th),
 	}
 }
 
@@ -70,7 +76,8 @@ func (sv *StructureView) SetTable(ctx context.Context, pool *connection.Pool, sc
 		sv.loading = false
 		return err
 	}
-	sv.columnsView.SetColumns(columns)
+	sv.columnsData = columns
+	sv.setColumnsTableData(columns)
 
 	// Load constraints
 	constraints, err := metadata.GetConstraints(ctx, pool, schema, table)
@@ -79,7 +86,8 @@ func (sv *StructureView) SetTable(ctx context.Context, pool *connection.Pool, sc
 		sv.loading = false
 		return err
 	}
-	sv.constraintsView.SetConstraints(constraints)
+	sv.constraintsData = constraints
+	sv.setConstraintsTableData(constraints)
 
 	// Load indexes
 	indexes, err := metadata.GetIndexes(ctx, pool, schema, table)
@@ -88,10 +96,143 @@ func (sv *StructureView) SetTable(ctx context.Context, pool *connection.Pool, sc
 		sv.loading = false
 		return err
 	}
-	sv.indexesView.SetIndexes(indexes)
+	sv.indexesData = indexes
+	sv.setIndexesTableData(indexes)
 
 	sv.loading = false
 	return nil
+}
+
+// setColumnsTableData converts column details to TableView format
+func (sv *StructureView) setColumnsTableData(columns []models.ColumnDetail) {
+	headers := []string{"Name", "Type", "Nullable", "Default", "Constraints", "Comment"}
+	rows := make([][]string, len(columns))
+
+	for i, col := range columns {
+		// Format constraint markers
+		constraints := sv.formatColumnConstraints(col)
+		nullable := "NO"
+		if col.IsNullable {
+			nullable = "YES"
+		}
+
+		rows[i] = []string{
+			col.Name,
+			col.DataType,
+			nullable,
+			col.DefaultValue,
+			constraints,
+			col.Comment,
+		}
+	}
+
+	sv.columnsTable.SetData(headers, rows, len(rows))
+}
+
+func (sv *StructureView) formatColumnConstraints(col models.ColumnDetail) string {
+	markers := []string{}
+	if col.IsPrimaryKey {
+		markers = append(markers, "PK")
+	}
+	if col.IsForeignKey {
+		markers = append(markers, "FK")
+	}
+	if col.IsUnique {
+		markers = append(markers, "UQ")
+	}
+	if col.HasCheck {
+		markers = append(markers, "CK")
+	}
+	if len(markers) == 0 {
+		return "-"
+	}
+	return strings.Join(markers, ", ")
+}
+
+// setConstraintsTableData converts constraints to TableView format
+func (sv *StructureView) setConstraintsTableData(constraints []models.Constraint) {
+	headers := []string{"Type", "Name", "Columns", "Definition", "Description"}
+	rows := make([][]string, len(constraints))
+
+	for i, con := range constraints {
+		typeLabel := metadata.FormatConstraintType(con.Type)
+		columnsStr := strings.Join(con.Columns, ", ")
+		definition := sv.formatConstraintDefinition(con)
+		description := sv.formatConstraintDescription(con)
+
+		rows[i] = []string{
+			typeLabel,
+			con.Name,
+			columnsStr,
+			definition,
+			description,
+		}
+	}
+
+	sv.constraintsTable.SetData(headers, rows, len(rows))
+}
+
+func (sv *StructureView) formatConstraintDefinition(con models.Constraint) string {
+	if con.Type == "f" && con.ForeignTable != "" {
+		fkCols := strings.Join(con.ForeignCols, ", ")
+		return fmt.Sprintf("→ %s(%s)", con.ForeignTable, fkCols)
+	}
+	return con.Definition
+}
+
+func (sv *StructureView) formatConstraintDescription(con models.Constraint) string {
+	switch con.Type {
+	case "p":
+		return "Primary key constraint"
+	case "f":
+		return fmt.Sprintf("References %s", con.ForeignTable)
+	case "u":
+		return "Unique constraint"
+	case "c":
+		return "Check constraint"
+	default:
+		return "-"
+	}
+}
+
+// setIndexesTableData converts indexes to TableView format
+func (sv *StructureView) setIndexesTableData(indexes []models.IndexInfo) {
+	headers := []string{"Name", "Type", "Columns", "Properties", "Size", "Definition"}
+	rows := make([][]string, len(indexes))
+
+	for i, idx := range indexes {
+		columnsStr := strings.Join(idx.Columns, ", ")
+		properties := sv.formatIndexProperties(idx)
+		sizeStr := metadata.FormatSize(idx.Size)
+
+		rows[i] = []string{
+			idx.Name,
+			idx.Type,
+			columnsStr,
+			properties,
+			sizeStr,
+			idx.Definition,
+		}
+	}
+
+	sv.indexesTable.SetData(headers, rows, len(rows))
+}
+
+func (sv *StructureView) formatIndexProperties(idx models.IndexInfo) string {
+	props := []string{}
+	if idx.IsPrimary {
+		props = append(props, "PK")
+	}
+	if idx.IsUnique {
+		props = append(props, "UQ")
+	}
+	if idx.IsPartial {
+		props = append(props, "Partial")
+	}
+	if len(props) == 0 {
+		return "-"
+	}
+	return strings.Join(props, ", ")
 }
 
 // SwitchTab switches to a specific tab
@@ -108,33 +249,44 @@ func (sv *StructureView) Update(msg tea.KeyMsg) {
 		return
 	}
 
+	// Get current table view for the active structure tab
+	currentTable := sv.getCurrentTableView()
+	if currentTable == nil {
+		return
+	}
+
 	// Handle navigation keys for structure tabs
 	switch msg.String() {
 	case "up", "k":
-		sv.getCurrentView().MoveSelection(-1)
+		currentTable.MoveSelection(-1)
 	case "down", "j":
-		sv.getCurrentView().MoveSelection(1)
+		currentTable.MoveSelection(1)
 	case "left", "h":
-		sv.SwitchTab(sv.activeTab - 1)
+		currentTable.MoveSelectionHorizontal(-1)
 	case "right", "l":
-		sv.SwitchTab(sv.activeTab + 1)
+		currentTable.MoveSelectionHorizontal(1)
+	case "H":
+		currentTable.JumpScrollHorizontal(-1)
+	case "L":
+		currentTable.JumpScrollHorizontal(1)
+	case "0":
+		currentTable.JumpToFirstColumn()
+	case "$":
+		currentTable.JumpToLastColumn()
 	}
 }
 
-type structureViewNavigator interface {
-	MoveSelection(delta int)
-}
-
-func (sv *StructureView) getCurrentView() structureViewNavigator {
+// getCurrentTableView returns the TableView for the current structure tab
+func (sv *StructureView) getCurrentTableView() *TableView {
 	switch sv.activeTab {
 	case 1:
-		return sv.columnsView
+		return sv.columnsTable
 	case 2:
-		return sv.constraintsView
+		return sv.constraintsTable
 	case 3:
-		return sv.indexesView
+		return sv.indexesTable
 	default:
-		return sv.columnsView
+		return nil
 	}
 }
 
@@ -161,26 +313,26 @@ func (sv *StructureView) View() string {
 	// Calculate content height (subtract tab bar + newline)
 	contentHeight := sv.Height - 2
 
-	// Update view dimensions
+	// Update view dimensions for all TableViews
 	sv.tableView.Width = sv.Width
 	sv.tableView.Height = contentHeight
-	sv.columnsView.Width = sv.Width
-	sv.columnsView.Height = contentHeight
-	sv.constraintsView.Width = sv.Width
-	sv.constraintsView.Height = contentHeight
-	sv.indexesView.Width = sv.Width
-	sv.indexesView.Height = contentHeight
+	sv.columnsTable.Width = sv.Width
+	sv.columnsTable.Height = contentHeight
+	sv.constraintsTable.Width = sv.Width
+	sv.constraintsTable.Height = contentHeight
+	sv.indexesTable.Width = sv.Width
+	sv.indexesTable.Height = contentHeight
 
 	// Render active tab content
 	switch sv.activeTab {
 	case 0:
 		b.WriteString(sv.tableView.View())
 	case 1:
-		b.WriteString(sv.columnsView.View())
+		b.WriteString(sv.columnsTable.View())
 	case 2:
-		b.WriteString(sv.constraintsView.View())
+		b.WriteString(sv.constraintsTable.View())
 	case 3:
-		b.WriteString(sv.indexesView.View())
+		b.WriteString(sv.indexesTable.View())
 	default:
 		b.WriteString("Unknown tab")
 	}
@@ -248,15 +400,15 @@ func (sv *StructureView) CopyCurrentName() string {
 	var name string
 	switch sv.activeTab {
 	case 1:
-		if col := sv.columnsView.GetSelectedColumn(); col != nil {
+		if col := sv.getSelectedColumn(); col != nil {
 			name = col.Name
 		}
 	case 2:
-		if con := sv.constraintsView.GetSelectedConstraint(); con != nil {
+		if con := sv.getSelectedConstraint(); con != nil {
 			name = con.Name
 		}
 	case 3:
-		if idx := sv.indexesView.GetSelectedIndex(); idx != nil {
+		if idx := sv.getSelectedIndex(); idx != nil {
 			name = idx.Name
 		}
 	}
@@ -273,18 +425,18 @@ func (sv *StructureView) CopyCurrentDefinition() string {
 	var definition string
 	switch sv.activeTab {
 	case 1:
-		if col := sv.columnsView.GetSelectedColumn(); col != nil {
+		if col := sv.getSelectedColumn(); col != nil {
 			definition = fmt.Sprintf("%s %s %s DEFAULT %s",
 				col.Name, col.DataType,
 				map[bool]string{true: "NULL", false: "NOT NULL"}[col.IsNullable],
 				col.DefaultValue)
 		}
 	case 2:
-		if con := sv.constraintsView.GetSelectedConstraint(); con != nil {
+		if con := sv.getSelectedConstraint(); con != nil {
 			definition = con.Definition
 		}
 	case 3:
-		if idx := sv.indexesView.GetSelectedIndex(); idx != nil {
+		if idx := sv.getSelectedIndex(); idx != nil {
 			definition = idx.Definition
 		}
 	}
@@ -298,4 +450,31 @@ func (sv *StructureView) CopyCurrentDefinition() string {
 		return fmt.Sprintf("✓ Copied: %s", preview)
 	}
 	return ""
+}
+
+// getSelectedColumn returns the currently selected column from raw data
+func (sv *StructureView) getSelectedColumn() *models.ColumnDetail {
+	idx := sv.columnsTable.SelectedRow
+	if idx < 0 || idx >= len(sv.columnsData) {
+		return nil
+	}
+	return &sv.columnsData[idx]
+}
+
+// getSelectedConstraint returns the currently selected constraint from raw data
+func (sv *StructureView) getSelectedConstraint() *models.Constraint {
+	idx := sv.constraintsTable.SelectedRow
+	if idx < 0 || idx >= len(sv.constraintsData) {
+		return nil
+	}
+	return &sv.constraintsData[idx]
+}
+
+// getSelectedIndex returns the currently selected index from raw data
+func (sv *StructureView) getSelectedIndex() *models.IndexInfo {
+	idx := sv.indexesTable.SelectedRow
+	if idx < 0 || idx >= len(sv.indexesData) {
+		return nil
+	}
+	return &sv.indexesData[idx]
 }
