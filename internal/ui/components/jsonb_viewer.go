@@ -72,6 +72,9 @@ type JSONBViewer struct {
 
 	// Status message (e.g., "Path copied!")
 	statusMessage string
+
+	// Preview pane for truncated string values
+	previewPane *PreviewPane
 }
 
 // NewJSONBViewer creates a new tree-based JSONB viewer
@@ -83,6 +86,7 @@ func NewJSONBViewer(th theme.Theme) *JSONBViewer {
 		selectedIndex: 0,
 		scrollOffset:  0,
 		marks:         make(map[rune]*TreeNode),
+		previewPane:   NewPreviewPane(th),
 	}
 }
 
@@ -377,6 +381,12 @@ func (jv *JSONBViewer) Update(msg tea.KeyMsg) (*JSONBViewer, tea.Cmd) {
 		// Jump to parent
 		jv.jumpToParent()
 
+	case "P":
+		// Toggle preview pane
+		if jv.previewPane != nil {
+			jv.previewPane.Toggle()
+		}
+
 	// === Phase 2: JSON-specific Navigation ===
 	case "]":
 		// Jump to next array
@@ -465,6 +475,9 @@ func (jv *JSONBViewer) adjustScroll() {
 	if jv.selectedIndex >= jv.scrollOffset+contentHeight {
 		jv.scrollOffset = jv.selectedIndex - contentHeight + 1
 	}
+
+	// Update preview pane
+	jv.updatePreviewPane()
 }
 
 // expandAll recursively expands all nodes
@@ -616,8 +629,21 @@ func (jv *JSONBViewer) View() string {
 		sections = append(sections, instrStyle.Render(instr))
 	}
 
-	// Content (tree view or help)
-	contentHeight := jv.Height - 5
+	// Calculate preview pane height
+	previewHeight := 0
+	if jv.previewPane != nil && jv.previewPane.Visible {
+		// Set preview pane dimensions
+		maxPreviewHeight := jv.Height / 4
+		if maxPreviewHeight < 4 {
+			maxPreviewHeight = 4
+		}
+		jv.previewPane.Width = jv.Width - 4 // Account for container padding
+		jv.previewPane.MaxHeight = maxPreviewHeight
+		previewHeight = jv.previewPane.Height()
+	}
+
+	// Content (tree view or help) - adjust height for preview pane
+	contentHeight := jv.Height - 5 - previewHeight
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
@@ -629,6 +655,11 @@ func (jv *JSONBViewer) View() string {
 		content = jv.renderTree(contentHeight)
 	}
 	sections = append(sections, content)
+
+	// Preview pane (if visible)
+	if jv.previewPane != nil && previewHeight > 0 {
+		sections = append(sections, jv.previewPane.View())
+	}
 
 	// Status bar
 	statusBar := jv.renderStatus()
@@ -1241,4 +1272,46 @@ func (jv *JSONBViewer) copyCurrentValue() {
 		preview = preview[:47] + "..."
 	}
 	jv.statusMessage = fmt.Sprintf("✓ Copied value: %s", preview)
+}
+
+// updatePreviewPane updates the preview pane with current node info
+func (jv *JSONBViewer) updatePreviewPane() {
+	if jv.previewPane == nil || jv.selectedIndex >= len(jv.visibleNodes) {
+		return
+	}
+
+	node := jv.visibleNodes[jv.selectedIndex]
+
+	// Build JSON path
+	var path string
+	if len(node.Path) > 0 {
+		path = "$." + strings.Join(node.Path, ".")
+	} else {
+		path = "$"
+	}
+
+	// Check if value is truncated (string > 50 chars)
+	isTruncated := false
+	content := ""
+
+	switch node.Type {
+	case NodeString:
+		str := fmt.Sprintf("%v", node.Value)
+		content = str
+		isTruncated = len(str) > 50
+	case NodeObject, NodeArray:
+		// Format as JSON
+		if jsonBytes, err := json.MarshalIndent(node.Value, "", "  "); err == nil {
+			content = string(jsonBytes)
+			isTruncated = true // Always show for objects/arrays
+		}
+	case NodeNumber, NodeBoolean:
+		content = fmt.Sprintf("%v", node.Value)
+		isTruncated = false
+	case NodeNull:
+		content = "null"
+		isTruncated = false
+	}
+
+	jv.previewPane.SetContent(content, path, isTruncated)
 }

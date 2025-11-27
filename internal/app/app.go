@@ -836,6 +836,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a, nil
 				}
 
+				// Handle preview pane scrolling (when visible)
+				if a.tableView.PreviewPane != nil && a.tableView.PreviewPane.Visible {
+					switch msg.String() {
+					case "ctrl+up":
+						a.tableView.PreviewPane.ScrollUp()
+						return a, nil
+					case "ctrl+down":
+						a.tableView.PreviewPane.ScrollDown()
+						return a, nil
+					}
+				}
+
 				switch msg.String() {
 				case "up", "k":
 					a.tableView.MoveSelection(-1)
@@ -950,6 +962,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					a.searchInput.Reset()
 					a.searchInput.Width = a.rightPanel.Width - 4
 					a.showSearch = true
+					return a, nil
+				case "p":
+					// Toggle preview pane
+					a.tableView.TogglePreviewPane()
+					return a, nil
+				case "y":
+					// Copy preview pane content (yank)
+					if a.tableView.PreviewPane != nil && a.tableView.PreviewPane.Visible {
+						if err := a.tableView.PreviewPane.CopyContent(); err == nil {
+							log.Println("Copied preview content to clipboard")
+						}
+					}
 					return a, nil
 				case "n":
 					// Next search match
@@ -1176,6 +1200,8 @@ func (a *App) renderNormalView() string {
 			separatorStyle.Render(" │ ") +
 			keyStyle.Render("Ctrl+D/U") + dimStyle.Render(" page") +
 			separatorStyle.Render(" │ ") +
+			keyStyle.Render("p") + dimStyle.Render(" preview") +
+			separatorStyle.Render(" │ ") +
 			keyStyle.Render("j") + dimStyle.Render(" jsonb")
 	}
 
@@ -1317,9 +1343,28 @@ func (a *App) renderNormalView() string {
 func (a *App) renderRightPanel(width, height int) string {
 	// If table is selected, show structure view with tabs
 	if a.currentTable != "" {
+		// Calculate preview pane height
+		previewHeight := 0
+		if a.currentTab == 0 && a.tableView.PreviewPane != nil {
+			// Set preview pane dimensions (max 1/3 of available height)
+			maxPreviewHeight := height / 3
+			if maxPreviewHeight < 5 {
+				maxPreviewHeight = 5
+			}
+			a.tableView.SetPreviewPaneDimensions(width, maxPreviewHeight)
+			a.tableView.UpdatePreviewPane()
+			previewHeight = a.tableView.GetPreviewPaneHeight()
+		}
+
+		// Calculate main content height (subtract preview pane height)
+		mainHeight := height - previewHeight
+		if mainHeight < 5 {
+			mainHeight = 5
+		}
+
 		// Update structure view dimensions
 		a.structureView.Width = width
-		a.structureView.Height = height
+		a.structureView.Height = mainHeight
 
 		// Load table structure if needed (when table changes)
 		conn, err := a.connectionManager.GetActive()
@@ -1337,8 +1382,16 @@ func (a *App) renderRightPanel(width, height int) string {
 			}
 		}
 
-		// Always show structure view (it handles tabs internally)
-		return a.structureView.View()
+		// Render main content
+		mainContent := a.structureView.View()
+
+		// If on Data tab and preview pane is visible, append it
+		if a.currentTab == 0 && previewHeight > 0 {
+			previewContent := a.tableView.PreviewPane.View()
+			return lipgloss.JoinVertical(lipgloss.Left, mainContent, previewContent)
+		}
+
+		return mainContent
 	}
 
 	// No table selected - show table view (will display empty state)

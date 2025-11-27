@@ -44,6 +44,9 @@ type TableView struct {
 	SearchQuery  string
 	Matches      []MatchPos // List of match positions
 	CurrentMatch int        // Index in Matches
+
+	// Preview pane for truncated content
+	PreviewPane *PreviewPane
 }
 
 // MatchPos represents a search match position
@@ -62,6 +65,7 @@ func NewTableView(th theme.Theme) *TableView {
 		SortColumn:    -1,
 		SortDirection: "ASC",
 		NullsFirst:    false,
+		PreviewPane:   NewPreviewPane(th),
 	}
 }
 
@@ -454,6 +458,9 @@ func (tv *TableView) MoveSelection(delta int) {
 	if tv.SelectedRow >= tv.TopRow+tv.VisibleRows {
 		tv.TopRow = tv.SelectedRow - tv.VisibleRows + 1
 	}
+
+	// Update preview pane
+	tv.UpdatePreviewPane()
 }
 
 // PageUp/PageDown
@@ -515,6 +522,9 @@ func (tv *TableView) MoveSelectionHorizontal(delta int) {
 	if tv.LeftColOffset > maxOffset {
 		tv.LeftColOffset = maxOffset
 	}
+
+	// Update preview pane
+	tv.UpdatePreviewPane()
 }
 
 // JumpScrollHorizontal scrolls horizontally by half the visible columns
@@ -723,4 +733,78 @@ func (tv *TableView) GetMatchInfo() (current int, total int) {
 		return 0, 0
 	}
 	return tv.CurrentMatch + 1, len(tv.Matches)
+}
+
+// IsCellTruncated checks if the currently selected cell content is truncated
+func (tv *TableView) IsCellTruncated() bool {
+	if tv.SelectedRow < 0 || tv.SelectedRow >= len(tv.Rows) {
+		return false
+	}
+	if tv.SelectedCol < 0 || tv.SelectedCol >= len(tv.ColumnWidths) {
+		return false
+	}
+	if tv.SelectedCol >= len(tv.Rows[tv.SelectedRow]) {
+		return false
+	}
+
+	cellValue := tv.Rows[tv.SelectedRow][tv.SelectedCol]
+	colWidth := tv.ColumnWidths[tv.SelectedCol]
+
+	// Check if cell content width exceeds column width
+	return runewidth.StringWidth(cellValue) > colWidth
+}
+
+// GetSelectedCellContent returns the full content of the selected cell
+func (tv *TableView) GetSelectedCellContent() string {
+	if tv.SelectedRow < 0 || tv.SelectedRow >= len(tv.Rows) {
+		return ""
+	}
+	if tv.SelectedCol < 0 || tv.SelectedCol >= len(tv.Rows[tv.SelectedRow]) {
+		return ""
+	}
+	return tv.Rows[tv.SelectedRow][tv.SelectedCol]
+}
+
+// GetSelectedColumnName returns the name of the currently selected column
+func (tv *TableView) GetSelectedColumnName() string {
+	if tv.SelectedCol < 0 || tv.SelectedCol >= len(tv.Columns) {
+		return ""
+	}
+	return tv.Columns[tv.SelectedCol]
+}
+
+// UpdatePreviewPane updates the preview pane with current selection
+func (tv *TableView) UpdatePreviewPane() {
+	if tv.PreviewPane == nil {
+		return
+	}
+
+	content := tv.GetSelectedCellContent()
+	title := tv.GetSelectedColumnName()
+	isTruncated := tv.IsCellTruncated()
+
+	tv.PreviewPane.SetContent(content, title, isTruncated)
+}
+
+// SetPreviewPaneDimensions sets the dimensions for the preview pane
+func (tv *TableView) SetPreviewPaneDimensions(width, maxHeight int) {
+	if tv.PreviewPane != nil {
+		tv.PreviewPane.Width = width
+		tv.PreviewPane.MaxHeight = maxHeight
+	}
+}
+
+// TogglePreviewPane toggles the preview pane visibility
+func (tv *TableView) TogglePreviewPane() {
+	if tv.PreviewPane != nil {
+		tv.PreviewPane.Toggle()
+	}
+}
+
+// GetPreviewPaneHeight returns the current preview pane height
+func (tv *TableView) GetPreviewPaneHeight() int {
+	if tv.PreviewPane != nil {
+		return tv.PreviewPane.Height()
+	}
+	return 0
 }
