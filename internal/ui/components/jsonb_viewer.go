@@ -72,6 +72,9 @@ type JSONBViewer struct {
 
 	// Status message (e.g., "Path copied!")
 	statusMessage string
+
+	// Preview pane for truncated string values
+	previewPane *PreviewPane
 }
 
 // NewJSONBViewer creates a new tree-based JSONB viewer
@@ -83,6 +86,7 @@ func NewJSONBViewer(th theme.Theme) *JSONBViewer {
 		selectedIndex: 0,
 		scrollOffset:  0,
 		marks:         make(map[rune]*TreeNode),
+		previewPane:   NewPreviewPane(th),
 	}
 }
 
