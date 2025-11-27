@@ -469,6 +469,9 @@ func (jv *JSONBViewer) adjustScroll() {
 	if jv.selectedIndex >= jv.scrollOffset+contentHeight {
 		jv.scrollOffset = jv.selectedIndex - contentHeight + 1
 	}
+
+	// Update preview pane
+	jv.updatePreviewPane()
 }
 
 // expandAll recursively expands all nodes
@@ -1245,4 +1248,46 @@ func (jv *JSONBViewer) copyCurrentValue() {
 		preview = preview[:47] + "..."
 	}
 	jv.statusMessage = fmt.Sprintf("✓ Copied value: %s", preview)
+}
+
+// updatePreviewPane updates the preview pane with current node info
+func (jv *JSONBViewer) updatePreviewPane() {
+	if jv.previewPane == nil || jv.selectedIndex >= len(jv.visibleNodes) {
+		return
+	}
+
+	node := jv.visibleNodes[jv.selectedIndex]
+
+	// Build JSON path
+	var path string
+	if len(node.Path) > 0 {
+		path = "$." + strings.Join(node.Path, ".")
+	} else {
+		path = "$"
+	}
+
+	// Check if value is truncated (string > 50 chars)
+	isTruncated := false
+	content := ""
+
+	switch node.Type {
+	case NodeString:
+		str := fmt.Sprintf("%v", node.Value)
+		content = str
+		isTruncated = len(str) > 50
+	case NodeObject, NodeArray:
+		// Format as JSON
+		if jsonBytes, err := json.MarshalIndent(node.Value, "", "  "); err == nil {
+			content = string(jsonBytes)
+			isTruncated = true // Always show for objects/arrays
+		}
+	case NodeNumber, NodeBoolean:
+		content = fmt.Sprintf("%v", node.Value)
+		isTruncated = false
+	case NodeNull:
+		content = "null"
+		isTruncated = false
+	}
+
+	jv.previewPane.SetContent(content, path, isTruncated)
 }
