@@ -451,7 +451,7 @@ func (jv *JSONBViewer) Update(msg tea.KeyMsg) (*JSONBViewer, tea.Cmd) {
 
 // adjustScroll adjusts scroll offset to keep selected node visible
 func (jv *JSONBViewer) adjustScroll() {
-	contentHeight := jv.Height - 5 // Account for header and footer
+	contentHeight := jv.Height - 7 // Account for border, title, instructions, status
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
@@ -573,22 +573,26 @@ func (jv *JSONBViewer) expandPathToNode(target *TreeNode) {
 
 // View renders the JSONB viewer
 func (jv *JSONBViewer) View() string {
+	// Calculate content width (subtract border and padding)
+	contentWidth := jv.Width - 4 // 2 for border, 2 for padding
+
 	var sections []string
 
-	// Title bar
+	// Title bar - full width with background
 	titleStyle := lipgloss.NewStyle().
 		Foreground(jv.Theme.Background).
 		Background(jv.Theme.Info).
-		Padding(0, 1).
-		Bold(true)
+		Bold(true).
+		Width(contentWidth).
+		Padding(0, 1)
 
-	title := " JSONB Tree Viewer"
+	title := "JSONB Tree Viewer"
 	sections = append(sections, titleStyle.Render(title))
 
 	// Instructions or search bar
 	instrStyle := lipgloss.NewStyle().
 		Foreground(jv.Theme.Metadata).
-		Padding(0, 1)
+		Width(contentWidth)
 
 	if jv.searchMode {
 		searchBar := fmt.Sprintf("Search: %s_", jv.searchQuery)
@@ -607,17 +611,18 @@ func (jv *JSONBViewer) View() string {
 		sections = append(sections, instrStyle.Render(modeInfo))
 	} else if len(jv.searchResults) > 0 {
 		// Show search results navigation info
-		searchInfo := fmt.Sprintf("Search: \"%s\" (%d/%d)  n: Next  N: Prev  Esc: Clear",
+		searchInfo := fmt.Sprintf("Search: \"%s\" (%d/%d)  n/N: Next/Prev  Esc: Clear",
 			jv.searchQuery, jv.currentMatchIndex+1, len(jv.searchResults))
 		sections = append(sections, instrStyle.Render(searchInfo))
 	} else {
-		// Show help text - rotate through different hints
-		instr := "↑↓/jk: Move  g/G: Top/Bottom  Ctrl-f/b: Page  JK: Sibling  p: Parent  ]/[: Jump Type  y: Copy Path  m/': Mark  /: Search  ?: Help"
+		// Compact help text
+		instr := "jk:Move g/G:Top/Bottom Space:Expand JK:Sibling p:Parent /:Search y:Copy ?:Help q:Close"
 		sections = append(sections, instrStyle.Render(instr))
 	}
 
 	// Content (tree view or help)
-	contentHeight := jv.Height - 5
+	// Height calculation: total - border(2) - padding(2) - title(1) - instr(1) - status(1)
+	contentHeight := jv.Height - 7
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
@@ -634,20 +639,13 @@ func (jv *JSONBViewer) View() string {
 	statusBar := jv.renderStatus()
 	sections = append(sections, statusBar)
 
-	// Container
+	// Container with border
 	containerStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(jv.Theme.Border).
-		Width(jv.Width).
-		Padding(1)
+		BorderForeground(jv.Theme.BorderFocused).
+		Padding(0, 1)
 
-	return lipgloss.Place(
-		jv.Width,
-		jv.Height,
-		lipgloss.Center,
-		lipgloss.Center,
-		containerStyle.Render(strings.Join(sections, "\n")),
-	)
+	return containerStyle.Render(strings.Join(sections, "\n"))
 }
 
 // renderTree renders the visible portion of the tree
@@ -689,6 +687,17 @@ func (jv *JSONBViewer) isSearchMatch(node *TreeNode) bool {
 
 // renderNode renders a single tree node with proper indentation and styling
 func (jv *JSONBViewer) renderNode(node *TreeNode, isSelected bool, isSearchMatch bool) string {
+	// Selection indicator (shown at start of line)
+	var selIndicator string
+	if isSelected {
+		selIndicator = lipgloss.NewStyle().
+			Foreground(jv.Theme.BorderFocused).
+			Bold(true).
+			Render("▶ ")
+	} else {
+		selIndicator = "  "
+	}
+
 	// Indentation
 	indent := strings.Repeat("  ", node.Level)
 
@@ -698,15 +707,24 @@ func (jv *JSONBViewer) renderNode(node *TreeNode, isSelected bool, isSearchMatch
 		if node.IsExpanded {
 			indicator = "▼ "
 		} else {
-			indicator = "▶ "
+			indicator = "► "
 		}
 	} else {
 		indicator = "  "
 	}
 
 	// Key with syntax highlighting
-	keyStyle := lipgloss.NewStyle().Foreground(jv.Theme.Info) // Blue for keys
-	keyPart := keyStyle.Render(node.Key)
+	var keyPart string
+	if isSelected {
+		keyPart = lipgloss.NewStyle().
+			Foreground(jv.Theme.BorderFocused).
+			Bold(true).
+			Render(node.Key)
+	} else {
+		keyPart = lipgloss.NewStyle().
+			Foreground(jv.Theme.Info).
+			Render(node.Key)
+	}
 
 	// Value with syntax highlighting
 	var valuePart string
@@ -725,8 +743,13 @@ func (jv *JSONBViewer) renderNode(node *TreeNode, isSelected bool, isSearchMatch
 
 	case NodeString:
 		str := fmt.Sprintf("%v", node.Value)
-		if len(str) > 50 {
-			str = str[:47] + "..."
+		// Allow longer strings to be visible
+		maxLen := jv.Width - node.Level*2 - 20
+		if maxLen < 30 {
+			maxLen = 30
+		}
+		if len(str) > maxLen {
+			str = str[:maxLen-3] + "..."
 		}
 		valuePart = lipgloss.NewStyle().
 			Foreground(jv.Theme.Success). // Green for strings
@@ -749,46 +772,15 @@ func (jv *JSONBViewer) renderNode(node *TreeNode, isSelected bool, isSearchMatch
 			Render(": null")
 	}
 
-	// Add search match indicator (only if not selected)
+	// Search match indicator
 	var searchIndicator string
-	if isSearchMatch && !isSelected {
+	if isSearchMatch {
 		searchIndicator = lipgloss.NewStyle().
 			Foreground(jv.Theme.Warning).
-			Render(" 🔍")
+			Render(" ●")
 	}
 
-	line := indent + indicator + keyPart + valuePart + searchIndicator
-
-	// Priority 1: Highlight selected row (most prominent)
-	if isSelected {
-		style := lipgloss.NewStyle().
-			Background(jv.Theme.BorderFocused). // Bright blue background
-			Foreground(jv.Theme.Background).    // Dark text for contrast
-			Bold(true).
-			Width(jv.Width - 6) // Account for container padding
-
-		// If selected row is also a search match, add indicator
-		if isSearchMatch {
-			matchIndicator := lipgloss.NewStyle().
-				Foreground(jv.Theme.Warning).
-				Bold(true).
-				Render(" ⭐")
-			return style.Render(line + matchIndicator)
-		}
-
-		return style.Render(line)
-	}
-
-	// Priority 2: Highlight search matches with subtle background (less prominent)
-	if isSearchMatch {
-		return lipgloss.NewStyle().
-			Background(jv.Theme.Selection). // Subtle gray background
-			Foreground(jv.Theme.Foreground).
-			Width(jv.Width - 6).
-			Render(line)
-	}
-
-	return line
+	return selIndicator + indent + indicator + keyPart + valuePart + searchIndicator
 }
 
 // renderStatus renders the status bar at the bottom
@@ -831,7 +823,7 @@ func (jv *JSONBViewer) renderStatus() string {
 
 // pageDown scrolls down one full page
 func (jv *JSONBViewer) pageDown() {
-	contentHeight := jv.Height - 5
+	contentHeight := jv.Height - 7
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
@@ -844,7 +836,7 @@ func (jv *JSONBViewer) pageDown() {
 
 // pageUp scrolls up one full page
 func (jv *JSONBViewer) pageUp() {
-	contentHeight := jv.Height - 5
+	contentHeight := jv.Height - 7
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
@@ -857,7 +849,7 @@ func (jv *JSONBViewer) pageUp() {
 
 // halfPageDown scrolls down half a page
 func (jv *JSONBViewer) halfPageDown() {
-	contentHeight := jv.Height - 5
+	contentHeight := jv.Height - 7
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
@@ -870,7 +862,7 @@ func (jv *JSONBViewer) halfPageDown() {
 
 // halfPageUp scrolls up half a page
 func (jv *JSONBViewer) halfPageUp() {
-	contentHeight := jv.Height - 5
+	contentHeight := jv.Height - 7
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
