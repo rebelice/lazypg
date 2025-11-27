@@ -301,7 +301,9 @@ func (p *PreviewPane) View() string {
 	// Join content
 	content := strings.Join(contentParts, "\n")
 
-	// Apply container style (p.style already has borders and padding)
-	// Don't set Width/MaxHeight here as they would be added to frame size
-	return p.style.Render(content)
+	// Apply container style with width constraint
+	containerStyle := p.style.Copy().
+		Width(p.Width - p.style.GetHorizontalFrameSize())
+
+	return containerStyle.Render(content)
 }
