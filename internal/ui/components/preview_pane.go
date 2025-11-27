@@ -48,21 +48,28 @@ func NewPreviewPane(th theme.Theme) *PreviewPane {
 // SetContent sets the content to display
 // isTruncated indicates whether the content was truncated in the parent view
 func (p *PreviewPane) SetContent(content, title string, isTruncated bool) {
-	p.Content = content
+	// Skip if content hasn't changed (performance optimization)
+	contentChanged := p.Content != content
+
 	p.Title = title
 	p.IsTruncated = isTruncated
-	p.scrollY = 0
 
 	// Update visibility (only auto-show if not force hidden)
+	wasVisible := p.Visible
 	if !p.ForceHidden {
 		p.Visible = isTruncated && content != "" && content != "NULL"
 	}
 
-	// Only format content if visible (performance optimization)
-	if p.Visible {
+	// Only update content and reformat if content actually changed
+	if contentChanged {
+		p.Content = content
+		p.scrollY = 0
+		p.contentLines = nil // Clear cached lines, will be formatted on demand
+	}
+
+	// If becoming visible and we have no formatted lines, format now
+	if p.Visible && !wasVisible && p.contentLines == nil && content != "" {
 		p.formatContent()
-	} else {
-		p.contentLines = nil
 	}
 }
 
@@ -216,6 +223,11 @@ func (p *PreviewPane) CopyContent() error {
 func (p *PreviewPane) View() string {
 	if !p.Visible {
 		return ""
+	}
+
+	// Lazy format if needed
+	if p.contentLines == nil && p.Content != "" {
+		p.formatContent()
 	}
 
 	// Calculate dimensions

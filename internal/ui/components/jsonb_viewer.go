@@ -600,13 +600,16 @@ func (jv *JSONBViewer) RenderPreviewPanel(width, height int) string {
 		return ""
 	}
 
-	// Set preview pane dimensions and reformat if width changed
+	// Set preview pane dimensions
 	newWidth := width - 4 // Account for border and padding
-	if jv.previewPane.Width != newWidth {
-		jv.previewPane.Width = newWidth
-		jv.previewPane.formatContent() // Reformat for new width
-	}
+	widthChanged := jv.previewPane.Width != newWidth
+	jv.previewPane.Width = newWidth
 	jv.previewPane.MaxHeight = height - 4
+
+	// Only reformat if width changed OR content lines are empty (lazy formatting)
+	if widthChanged || jv.previewPane.contentLines == nil {
+		jv.previewPane.formatContent()
+	}
 
 	// Build preview content
 	var sections []string
