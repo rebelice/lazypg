@@ -381,6 +381,12 @@ func (jv *JSONBViewer) Update(msg tea.KeyMsg) (*JSONBViewer, tea.Cmd) {
 		// Jump to parent
 		jv.jumpToParent()
 
+	case "P":
+		// Toggle preview pane
+		if jv.previewPane != nil {
+			jv.previewPane.Toggle()
+		}
+
 	// === Phase 2: JSON-specific Navigation ===
 	case "]":
 		// Jump to next array
