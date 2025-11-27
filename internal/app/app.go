@@ -1303,15 +1303,51 @@ func (a *App) renderNormalView() string {
 
 	// Render JSONB viewer if visible
 	if a.showJSONBViewer {
-		mainView = lipgloss.Place(
-			a.state.Width,
-			a.state.Height,
-			lipgloss.Center,
-			lipgloss.Center,
-			a.jsonbViewer.View(),
-			lipgloss.WithWhitespaceChars(" "),
-			lipgloss.WithWhitespaceForeground(lipgloss.Color("#555555")),
-		)
+		jsonbView := a.jsonbViewer.View()
+
+		// Check if preview panel should be shown alongside
+		if a.jsonbViewer.PreviewVisible() {
+			// Calculate preview panel width (use available space on right)
+			// JSONB viewer width + gap + preview width should fit in screen
+			gap := 2
+			previewWidth := (a.state.Width - a.jsonbViewer.Width - gap) / 2
+			if previewWidth < 30 {
+				previewWidth = 30
+			}
+			if previewWidth > 50 {
+				previewWidth = 50
+			}
+
+			previewPanel := a.jsonbViewer.RenderPreviewPanel(previewWidth, a.jsonbViewer.Height)
+
+			// Join panels side by side
+			combined := lipgloss.JoinHorizontal(
+				lipgloss.Top,
+				jsonbView,
+				strings.Repeat(" ", gap),
+				previewPanel,
+			)
+
+			mainView = lipgloss.Place(
+				a.state.Width,
+				a.state.Height,
+				lipgloss.Center,
+				lipgloss.Center,
+				combined,
+				lipgloss.WithWhitespaceChars(" "),
+				lipgloss.WithWhitespaceForeground(lipgloss.Color("#555555")),
+			)
+		} else {
+			mainView = lipgloss.Place(
+				a.state.Width,
+				a.state.Height,
+				lipgloss.Center,
+				lipgloss.Center,
+				jsonbView,
+				lipgloss.WithWhitespaceChars(" "),
+				lipgloss.WithWhitespaceForeground(lipgloss.Color("#555555")),
+			)
+		}
 	}
 
 	// Render favorites dialog if visible

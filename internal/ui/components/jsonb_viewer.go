@@ -584,60 +584,103 @@ func (jv *JSONBViewer) expandPathToNode(target *TreeNode) {
 	}
 }
 
-// View renders the JSONB viewer
+// View renders the JSONB viewer (main panel only, preview handled externally)
 func (jv *JSONBViewer) View() string {
-	// Check if preview pane should be shown (side panel layout)
-	showPreview := jv.previewPane != nil && jv.previewPane.Visible
+	return jv.renderMainPanel(jv.Width)
+}
 
-	// Calculate widths for side-by-side layout
-	mainWidth := jv.Width
-	previewWidth := 0
-	gap := 2 // Gap between panels
+// PreviewVisible returns whether the preview pane should be shown
+func (jv *JSONBViewer) PreviewVisible() bool {
+	return jv.previewPane != nil && jv.previewPane.Visible
+}
 
-	if showPreview {
-		// Split width: 60% tree, 40% preview
-		previewWidth = jv.Width * 2 / 5
-		if previewWidth < 30 {
-			previewWidth = 30
-		}
-		if previewWidth > 60 {
-			previewWidth = 60
-		}
-		mainWidth = jv.Width - previewWidth - gap
+// RenderPreviewPanel renders the preview panel for external layout
+func (jv *JSONBViewer) RenderPreviewPanel(width, height int) string {
+	if jv.previewPane == nil || !jv.previewPane.Visible {
+		return ""
 	}
 
-	// Build main panel (tree viewer)
-	mainPanel := jv.renderMainPanel(mainWidth)
+	// Set preview pane dimensions and reformat if width changed
+	newWidth := width - 4 // Account for border and padding
+	if jv.previewPane.Width != newWidth {
+		jv.previewPane.Width = newWidth
+		jv.previewPane.formatContent() // Reformat for new width
+	}
+	jv.previewPane.MaxHeight = height - 4
 
-	// If no preview, just return main panel centered
-	if !showPreview {
-		return lipgloss.Place(
-			jv.Width,
-			jv.Height,
-			lipgloss.Center,
-			lipgloss.Center,
-			mainPanel,
-		)
+	// Build preview content
+	var sections []string
+
+	// Title
+	titleStyle := lipgloss.NewStyle().
+		Foreground(jv.Theme.Info).
+		Bold(true)
+
+	title := "Preview"
+	if jv.previewPane.Title != "" {
+		title = "Preview: " + jv.previewPane.Title
+	}
+	// Truncate title if too long
+	maxTitleLen := width - 6
+	if len(title) > maxTitleLen && maxTitleLen > 3 {
+		title = title[:maxTitleLen-3] + "..."
+	}
+	sections = append(sections, titleStyle.Render(title))
+
+	// Content - use previewPane's formatted lines
+	contentHeight := height - 8 // Account for title, footer, borders, padding
+	if contentHeight < 1 {
+		contentHeight = 1
 	}
 
-	// Build preview panel
-	previewPanel := jv.renderPreviewPanel(previewWidth)
+	contentStyle := lipgloss.NewStyle().Foreground(jv.Theme.Foreground)
+	contentWidth := width - 6 // Account for border and padding
 
-	// Join panels side by side
-	combined := lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		mainPanel,
-		strings.Repeat(" ", gap),
-		previewPanel,
-	)
+	// Get visible lines from preview pane
+	startLine := jv.previewPane.scrollY
+	endLine := startLine + contentHeight
+	if endLine > len(jv.previewPane.contentLines) {
+		endLine = len(jv.previewPane.contentLines)
+	}
 
-	return lipgloss.Place(
-		jv.Width,
-		jv.Height,
-		lipgloss.Center,
-		lipgloss.Center,
-		combined,
-	)
+	var contentLines []string
+	for i := startLine; i < endLine; i++ {
+		line := jv.previewPane.contentLines[i]
+		// Truncate if too long
+		if len(line) > contentWidth {
+			line = line[:contentWidth-3] + "..."
+		}
+		contentLines = append(contentLines, contentStyle.Render(line))
+	}
+
+	// Pad with empty lines if needed
+	for len(contentLines) < contentHeight {
+		contentLines = append(contentLines, "")
+	}
+
+	sections = append(sections, strings.Join(contentLines, "\n"))
+
+	// Footer with help text
+	helpParts := []string{}
+	if jv.previewPane.IsScrollable() {
+		helpParts = append(helpParts, "Ctrl-↑↓: Scroll")
+	}
+	helpParts = append(helpParts, "y: Copy", "P: Toggle")
+
+	helpText := strings.Join(helpParts, " │ ")
+	helpStyle := lipgloss.NewStyle().
+		Foreground(jv.Theme.Metadata).
+		Italic(true)
+	sections = append(sections, helpStyle.Render(helpText))
+
+	// Container style
+	containerStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(jv.Theme.Border).
+		Width(width - 2). // Account for border
+		Padding(1)
+
+	return containerStyle.Render(strings.Join(sections, "\n"))
 }
 
 // renderMainPanel renders the main tree viewer panel
@@ -702,95 +745,6 @@ func (jv *JSONBViewer) renderMainPanel(width int) string {
 	// Status bar
 	statusBar := jv.renderStatus()
 	sections = append(sections, statusBar)
-
-	// Container style
-	containerStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(jv.Theme.Border).
-		Width(width - 2). // Account for border
-		Padding(1)
-
-	return containerStyle.Render(strings.Join(sections, "\n"))
-}
-
-// renderPreviewPanel renders the side preview panel
-func (jv *JSONBViewer) renderPreviewPanel(width int) string {
-	if jv.previewPane == nil {
-		return ""
-	}
-
-	// Set preview pane dimensions for side panel and reformat if width changed
-	newWidth := width - 4 // Account for border and padding
-	if jv.previewPane.Width != newWidth {
-		jv.previewPane.Width = newWidth
-		jv.previewPane.formatContent() // Reformat for new width
-	}
-	jv.previewPane.MaxHeight = jv.Height - 4
-
-	// Build preview content
-	var sections []string
-
-	// Title
-	titleStyle := lipgloss.NewStyle().
-		Foreground(jv.Theme.Info).
-		Bold(true)
-
-	title := "Preview"
-	if jv.previewPane.Title != "" {
-		title = "Preview: " + jv.previewPane.Title
-	}
-	// Truncate title if too long
-	maxTitleLen := width - 6
-	if len(title) > maxTitleLen && maxTitleLen > 3 {
-		title = title[:maxTitleLen-3] + "..."
-	}
-	sections = append(sections, titleStyle.Render(title))
-
-	// Content - use previewPane's formatted lines
-	contentHeight := jv.Height - 8 // Account for title, footer, borders, padding
-	if contentHeight < 1 {
-		contentHeight = 1
-	}
-
-	contentStyle := lipgloss.NewStyle().Foreground(jv.Theme.Foreground)
-	contentWidth := width - 6 // Account for border and padding
-
-	// Get visible lines from preview pane
-	startLine := jv.previewPane.scrollY
-	endLine := startLine + contentHeight
-	if endLine > len(jv.previewPane.contentLines) {
-		endLine = len(jv.previewPane.contentLines)
-	}
-
-	var contentLines []string
-	for i := startLine; i < endLine; i++ {
-		line := jv.previewPane.contentLines[i]
-		// Truncate if too long
-		if len(line) > contentWidth {
-			line = line[:contentWidth-3] + "..."
-		}
-		contentLines = append(contentLines, contentStyle.Render(line))
-	}
-
-	// Pad with empty lines if needed
-	for len(contentLines) < contentHeight {
-		contentLines = append(contentLines, "")
-	}
-
-	sections = append(sections, strings.Join(contentLines, "\n"))
-
-	// Footer with help text
-	helpParts := []string{}
-	if jv.previewPane.IsScrollable() {
-		helpParts = append(helpParts, "Ctrl-↑↓: Scroll")
-	}
-	helpParts = append(helpParts, "y: Copy", "P: Toggle")
-
-	helpText := strings.Join(helpParts, " │ ")
-	helpStyle := lipgloss.NewStyle().
-		Foreground(jv.Theme.Metadata).
-		Italic(true)
-	sections = append(sections, helpStyle.Render(helpText))
 
 	// Container style
 	containerStyle := lipgloss.NewStyle().
