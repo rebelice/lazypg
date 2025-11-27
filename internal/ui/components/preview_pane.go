@@ -186,3 +186,85 @@ func (p *PreviewPane) ScrollDown() {
 		p.scrollY++
 	}
 }
+
+// View renders the preview pane
+func (p *PreviewPane) View() string {
+	if !p.Visible {
+		return ""
+	}
+
+	// Calculate dimensions
+	contentWidth := p.Width - p.style.GetHorizontalFrameSize()
+	maxContentHeight := p.MaxHeight - p.style.GetVerticalFrameSize()
+	if maxContentHeight < 1 {
+		maxContentHeight = 1
+	}
+
+	// Build header
+	titleStyle := lipgloss.NewStyle().
+		Foreground(p.Theme.Info).
+		Bold(true)
+
+	header := titleStyle.Render("Preview")
+	if p.Title != "" {
+		header = titleStyle.Render("Preview: " + p.Title)
+	}
+
+	// Truncate header if too long
+	if runewidth.StringWidth(header) > contentWidth-4 {
+		header = runewidth.Truncate(header, contentWidth-4, "...")
+	}
+
+	// Get visible content lines
+	startLine := p.scrollY
+	endLine := startLine + maxContentHeight - 2 // -2 for header and footer
+	if endLine > len(p.contentLines) {
+		endLine = len(p.contentLines)
+	}
+
+	var contentParts []string
+	contentParts = append(contentParts, header)
+
+	// Add content lines
+	contentStyle := lipgloss.NewStyle().Foreground(p.Theme.Foreground)
+	for i := startLine; i < endLine; i++ {
+		line := p.contentLines[i]
+		// Truncate line if too long
+		if runewidth.StringWidth(line) > contentWidth {
+			line = runewidth.Truncate(line, contentWidth, "...")
+		}
+		contentParts = append(contentParts, contentStyle.Render(line))
+	}
+
+	// Build help text
+	helpParts := []string{}
+	if p.IsScrollable() {
+		helpParts = append(helpParts, "↑↓: Scroll")
+	}
+	helpParts = append(helpParts, "p: Toggle")
+
+	// Add JSONB hint if content is JSON
+	if jsonb.IsJSONB(p.Content) {
+		helpParts = append(helpParts, "J: Tree")
+	}
+
+	helpText := strings.Join(helpParts, " │ ")
+	helpStyle := lipgloss.NewStyle().
+		Foreground(p.Theme.Metadata).
+		Italic(true)
+
+	// Build footer with right-aligned help
+	footerPadding := contentWidth - runewidth.StringWidth(helpText)
+	if footerPadding < 0 {
+		footerPadding = 0
+	}
+	footer := strings.Repeat(" ", footerPadding) + helpStyle.Render(helpText)
+	contentParts = append(contentParts, footer)
+
+	// Join content
+	content := strings.Join(contentParts, "\n")
+
+	// Apply container style (p.style already has borders and padding)
+	// Don't set Width/MaxHeight here as they would be added to frame size
+	return p.style.Render(content)
+}
