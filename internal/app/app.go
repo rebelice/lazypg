@@ -680,6 +680,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, nil
 			}
 
+		// Tab switching with [ and ] (like lazygit)
+		case "[":
+			if a.currentTab > 0 {
+				a.currentTab--
+				a.structureView.SwitchTab(a.currentTab)
+			}
+			return a, nil
+
+		case "]":
+			if a.currentTab < 3 {
+				a.currentTab++
+				a.structureView.SwitchTab(a.currentTab)
+			}
+			return a, nil
+
 		case "ctrl+p":
 			// Open quick query
 			a.showQuickQuery = true
@@ -1221,6 +1236,8 @@ func (a *App) renderNormalView() string {
 
 	// Common keys on the right with icons
 	bottomBarRight := keyStyle.Render("Tab") + dimStyle.Render(" switch") +
+		separatorStyle.Render(" │ ") +
+		keyStyle.Render("[]") + dimStyle.Render(" tabs") +
 		separatorStyle.Render(" │ ") +
 		keyStyle.Render("c") + dimStyle.Render(" connect") +
 		separatorStyle.Render(" │ ") +

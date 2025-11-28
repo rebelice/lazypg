@@ -378,16 +378,16 @@ func (jv *JSONBViewer) Update(msg tea.KeyMsg) (*JSONBViewer, tea.Cmd) {
 		jv.jumpToPrevSibling()
 
 	case "p":
-		// Jump to parent
-		jv.jumpToParent()
-
-	case "P":
 		// Toggle preview pane
 		if jv.previewPane != nil {
 			// Update content before toggling (so it has latest selection)
 			jv.updatePreviewPane()
 			jv.previewPane.Toggle()
 		}
+
+	case "P":
+		// Jump to parent
+		jv.jumpToParent()
 
 	// === Phase 2: JSON-specific Navigation ===
 	case "]":
@@ -672,7 +672,7 @@ func (jv *JSONBViewer) RenderPreviewPanel(width, height int) string {
 	if jv.previewPane.IsScrollable() {
 		helpParts = append(helpParts, "Ctrl-↑↓: Scroll")
 	}
-	helpParts = append(helpParts, "y: Copy", "P: Toggle")
+	helpParts = append(helpParts, "y: Copy", "p: Toggle")
 
 	helpText := strings.Join(helpParts, " │ ")
 	helpStyle := lipgloss.NewStyle().
@@ -1271,7 +1271,8 @@ Tree Navigation:
   C            Collapse all nodes
   J            Jump to next sibling
   K            Jump to previous sibling
-  p            Jump to parent node
+  P            Jump to parent node
+  p            Toggle preview pane
 
 JSON Type Navigation:
   ]            Jump to next Array
