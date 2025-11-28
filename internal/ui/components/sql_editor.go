@@ -5,6 +5,7 @@ import (
 	"strings"
 	"unicode"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/rebeliceyang/lazypg/internal/ui/theme"
 )
@@ -565,4 +566,182 @@ func (e *SQLEditor) insertCursor(line string, tokens []Token) string {
 	}
 
 	return result.String()
+}
+
+// Update handles keyboard input
+func (e *SQLEditor) Update(msg tea.KeyMsg) (*SQLEditor, tea.Cmd) {
+	switch msg.String() {
+	// Cursor movement
+	case "left":
+		e.MoveCursorLeft()
+	case "right":
+		e.MoveCursorRight()
+	case "up":
+		e.MoveCursorUp()
+	case "down":
+		e.MoveCursorDown()
+	case "home":
+		e.MoveCursorToLineStart()
+	case "end":
+		e.MoveCursorToLineEnd()
+	case "ctrl+home":
+		e.MoveCursorToDocStart()
+	case "ctrl+end":
+		e.MoveCursorToDocEnd()
+
+	// Text editing
+	case "backspace":
+		e.DeleteCharBefore()
+	case "delete":
+		e.DeleteCharAfter()
+	case "enter":
+		e.InsertNewline()
+	case "ctrl+u":
+		e.Clear()
+
+	// History navigation
+	case "ctrl+up":
+		e.HistoryPrev()
+	case "ctrl+down":
+		e.HistoryNext()
+
+	// Execute
+	case "ctrl+enter":
+		sql := e.GetCurrentStatement()
+		if sql != "" {
+			e.AddToHistory(e.GetContent())
+			return e, func() tea.Msg {
+				return ExecuteQueryMsg{SQL: sql}
+			}
+		}
+
+	default:
+		// Handle printable characters
+		if len(msg.String()) == 1 {
+			ch := rune(msg.String()[0])
+			if ch >= 32 && ch <= 126 {
+				e.InsertChar(ch)
+			}
+		} else if msg.Type == tea.KeyRunes {
+			for _, r := range msg.Runes {
+				e.InsertChar(r)
+			}
+		}
+	}
+
+	return e, nil
+}
+
+// AddToHistory adds content to history
+func (e *SQLEditor) AddToHistory(content string) {
+	if content == "" {
+		return
+	}
+	// Avoid duplicates
+	if len(e.history) > 0 && e.history[len(e.history)-1] == content {
+		return
+	}
+	e.history = append(e.history, content)
+	e.historyIdx = len(e.history)
+}
+
+// HistoryPrev navigates to previous history entry
+func (e *SQLEditor) HistoryPrev() {
+	if len(e.history) == 0 {
+		return
+	}
+	if e.historyIdx > 0 {
+		e.historyIdx--
+		e.SetContent(e.history[e.historyIdx])
+	}
+}
+
+// HistoryNext navigates to next history entry
+func (e *SQLEditor) HistoryNext() {
+	if len(e.history) == 0 {
+		return
+	}
+	if e.historyIdx < len(e.history)-1 {
+		e.historyIdx++
+		e.SetContent(e.history[e.historyIdx])
+	} else {
+		e.historyIdx = len(e.history)
+		e.Clear()
+	}
+}
+
+// GetCurrentStatement returns the SQL statement at cursor position
+func (e *SQLEditor) GetCurrentStatement() string {
+	content := e.GetContent()
+	if content == "" {
+		return ""
+	}
+
+	// Find statement boundaries using semicolons
+	statements := splitStatements(content)
+	if len(statements) == 0 {
+		return strings.TrimSpace(content)
+	}
+
+	// Find which statement the cursor is in
+	charPos := 0
+	for row := 0; row < e.cursorRow; row++ {
+		charPos += len(e.lines[row]) + 1 // +1 for newline
+	}
+	charPos += e.cursorCol
+
+	// Find the statement containing this position
+	currentPos := 0
+	for _, stmt := range statements {
+		stmtLen := len(stmt)
+		if charPos >= currentPos && charPos <= currentPos+stmtLen {
+			return strings.TrimSpace(stmt)
+		}
+		currentPos += stmtLen + 1 // +1 for semicolon
+	}
+
+	// Return last statement if cursor is at end
+	return strings.TrimSpace(statements[len(statements)-1])
+}
+
+// splitStatements splits SQL content into individual statements
+func splitStatements(content string) []string {
+	var statements []string
+	var current strings.Builder
+	inString := false
+
+	for i := 0; i < len(content); i++ {
+		ch := content[i]
+
+		if ch == '\'' && !inString {
+			inString = true
+			current.WriteByte(ch)
+		} else if ch == '\'' && inString {
+			// Check for escaped quote
+			if i+1 < len(content) && content[i+1] == '\'' {
+				current.WriteByte(ch)
+				current.WriteByte(content[i+1])
+				i++
+			} else {
+				inString = false
+				current.WriteByte(ch)
+			}
+		} else if ch == ';' && !inString {
+			stmt := current.String()
+			if strings.TrimSpace(stmt) != "" {
+				statements = append(statements, stmt)
+			}
+			current.Reset()
+		} else {
+			current.WriteByte(ch)
+		}
+	}
+
+	// Add remaining content
+	stmt := current.String()
+	if strings.TrimSpace(stmt) != "" {
+		statements = append(statements, stmt)
+	}
+
+	return statements
 }
