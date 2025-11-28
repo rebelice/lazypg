@@ -1345,7 +1345,14 @@ func (a *App) renderNormalView() string {
 		Foreground(lipgloss.Color("#45475a")) // Surface1 for separators
 
 	var bottomBarLeft string
-	if a.state.FocusedPanel == models.LeftPanel {
+	if a.sqlEditorFocused {
+		// SQL editor mode
+		bottomBarLeft = keyStyle.Render("Ctrl+Enter") + dimStyle.Render(" execute") +
+			separatorStyle.Render(" │ ") +
+			keyStyle.Render("Ctrl+O") + dimStyle.Render(" editor") +
+			separatorStyle.Render(" │ ") +
+			keyStyle.Render("Esc") + dimStyle.Render(" close")
+	} else if a.state.FocusedPanel == models.LeftPanel {
 		// Tree navigation keys with icons
 		bottomBarLeft = keyStyle.Render("↑↓") + dimStyle.Render(" navigate") +
 			separatorStyle.Render(" │ ") +
@@ -1353,14 +1360,14 @@ func (a *App) renderNormalView() string {
 			separatorStyle.Render(" │ ") +
 			keyStyle.Render("Enter") + dimStyle.Render(" select")
 	} else {
-		// Table navigation keys
+		// Data panel - include SQL editor shortcut
 		bottomBarLeft = keyStyle.Render("↑↓") + dimStyle.Render(" navigate") +
 			separatorStyle.Render(" │ ") +
 			keyStyle.Render("Ctrl+D/U") + dimStyle.Render(" page") +
 			separatorStyle.Render(" │ ") +
-			keyStyle.Render("p") + dimStyle.Render(" preview") +
+			keyStyle.Render("Ctrl+E") + dimStyle.Render(" sql") +
 			separatorStyle.Render(" │ ") +
-			keyStyle.Render("j") + dimStyle.Render(" jsonb")
+			keyStyle.Render("p") + dimStyle.Render(" preview")
 	}
 
 	// Add filter indicator if active
