@@ -442,7 +442,7 @@ func (e *SQLEditor) View() string {
 
 		// Pad with empty lines if needed
 		for len(visibleLines) < contentHeight {
-			visibleLines = append(visibleLines, e.renderEmptyLine(len(e.lines)+len(visibleLines)-len(e.lines)+startLine))
+			visibleLines = append(visibleLines, e.renderEmptyLine(startLine+len(visibleLines)))
 		}
 	} else {
 		// Collapsed: show first 2 lines
@@ -457,7 +457,7 @@ func (e *SQLEditor) View() string {
 
 	content := strings.Join(visibleLines, "\n")
 
-	// Container style
+	// Container style - define first
 	borderColor := e.Theme.Border
 	if e.expanded {
 		borderColor = e.Theme.BorderFocused
@@ -465,9 +465,11 @@ func (e *SQLEditor) View() string {
 
 	containerStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(borderColor).
-		Width(e.Width - 2). // Account for border
-		Height(contentHeight)
+		BorderForeground(borderColor)
+
+	// Calculate content width using GetHorizontalFrameSize()
+	contentWidth := e.Width - containerStyle.GetHorizontalFrameSize()
+	containerStyle = containerStyle.Width(contentWidth)
 
 	return containerStyle.Render(content)
 }
