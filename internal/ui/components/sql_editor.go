@@ -1,6 +1,7 @@
 package components
 
 import (
+	"fmt"
 	"strings"
 	"unicode"
 
@@ -408,6 +409,157 @@ func (e *SQLEditor) renderTokens(tokens []Token) string {
 			style = lipgloss.NewStyle().Foreground(e.Theme.Foreground)
 		}
 		result.WriteString(style.Render(token.Value))
+	}
+
+	return result.String()
+}
+
+// View renders the SQL editor
+func (e *SQLEditor) View() string {
+	// Calculate visible lines based on height
+	contentHeight := e.Height - 2 // Account for borders
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+
+	// Determine which lines to show
+	var visibleLines []string
+	var startLine int
+
+	if e.expanded {
+		// Show all lines that fit, scroll if needed
+		if e.cursorRow >= contentHeight {
+			startLine = e.cursorRow - contentHeight + 1
+		}
+		endLine := startLine + contentHeight
+		if endLine > len(e.lines) {
+			endLine = len(e.lines)
+		}
+
+		for i := startLine; i < endLine; i++ {
+			visibleLines = append(visibleLines, e.renderLine(i, i == e.cursorRow))
+		}
+
+		// Pad with empty lines if needed
+		for len(visibleLines) < contentHeight {
+			visibleLines = append(visibleLines, e.renderEmptyLine(len(e.lines)+len(visibleLines)-len(e.lines)+startLine))
+		}
+	} else {
+		// Collapsed: show first 2 lines
+		for i := 0; i < 2 && i < len(e.lines); i++ {
+			visibleLines = append(visibleLines, e.renderLine(i, false))
+		}
+		// Pad if less than 2 lines
+		for len(visibleLines) < 2 {
+			visibleLines = append(visibleLines, e.renderEmptyLine(len(visibleLines)))
+		}
+	}
+
+	content := strings.Join(visibleLines, "\n")
+
+	// Container style
+	borderColor := e.Theme.Border
+	if e.expanded {
+		borderColor = e.Theme.BorderFocused
+	}
+
+	containerStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Width(e.Width - 2). // Account for border
+		Height(contentHeight)
+
+	return containerStyle.Render(content)
+}
+
+// renderLine renders a single line with line number and syntax highlighting
+func (e *SQLEditor) renderLine(lineNum int, hasCursor bool) string {
+	// Line number
+	lineNumWidth := e.getLineNumberWidth()
+	lineNumStr := fmt.Sprintf("%*d", lineNumWidth-3, lineNum+1)
+
+	lineNumStyle := lipgloss.NewStyle().Foreground(e.Theme.Metadata)
+	sepStyle := lipgloss.NewStyle().Foreground(e.Theme.Border)
+
+	lineNumPart := lineNumStyle.Render(lineNumStr) + sepStyle.Render(" │ ")
+
+	// Line content with syntax highlighting
+	line := e.lines[lineNum]
+	tokens := e.tokenizeLine(line)
+	contentPart := e.renderTokens(tokens)
+
+	// Insert cursor if this line has it
+	if hasCursor && e.expanded {
+		contentPart = e.insertCursor(line, tokens)
+	}
+
+	return lineNumPart + contentPart
+}
+
+// renderEmptyLine renders an empty line placeholder
+func (e *SQLEditor) renderEmptyLine(lineNum int) string {
+	lineNumWidth := e.getLineNumberWidth()
+	lineNumStr := fmt.Sprintf("%*s", lineNumWidth-3, "~")
+
+	lineNumStyle := lipgloss.NewStyle().Foreground(e.Theme.Metadata)
+	sepStyle := lipgloss.NewStyle().Foreground(e.Theme.Border)
+
+	return lineNumStyle.Render(lineNumStr) + sepStyle.Render(" │ ")
+}
+
+// getLineNumberWidth returns the width needed for line numbers
+func (e *SQLEditor) getLineNumberWidth() int {
+	maxLine := len(e.lines)
+	if maxLine < 10 {
+		maxLine = 10
+	}
+	digits := len(fmt.Sprintf("%d", maxLine))
+	if digits < 2 {
+		digits = 2
+	}
+	return digits + 3 // digits + space + separator
+}
+
+// insertCursor inserts the cursor character into the rendered line
+func (e *SQLEditor) insertCursor(line string, tokens []Token) string {
+	// Rebuild line with cursor
+	var result strings.Builder
+	charIdx := 0
+
+	cursorStyle := lipgloss.NewStyle().
+		Foreground(e.Theme.Background).
+		Background(e.Theme.Cursor)
+
+	for _, token := range tokens {
+		var style lipgloss.Style
+		switch token.Type {
+		case TokenKeyword:
+			style = lipgloss.NewStyle().Foreground(e.Theme.Keyword).Bold(true)
+		case TokenString:
+			style = lipgloss.NewStyle().Foreground(e.Theme.String)
+		case TokenNumber:
+			style = lipgloss.NewStyle().Foreground(e.Theme.Number)
+		case TokenComment:
+			style = lipgloss.NewStyle().Foreground(e.Theme.Comment).Italic(true)
+		case TokenOperator:
+			style = lipgloss.NewStyle().Foreground(e.Theme.Operator)
+		default:
+			style = lipgloss.NewStyle().Foreground(e.Theme.Foreground)
+		}
+
+		for _, ch := range token.Value {
+			if charIdx == e.cursorCol {
+				result.WriteString(cursorStyle.Render(string(ch)))
+			} else {
+				result.WriteString(style.Render(string(ch)))
+			}
+			charIdx++
+		}
+	}
+
+	// Cursor at end of line
+	if e.cursorCol >= charIdx {
+		result.WriteString(cursorStyle.Render(" "))
 	}
 
 	return result.String()
