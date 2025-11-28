@@ -13,6 +13,16 @@ import (
 
 const MaxResultTabs = 10
 
+// Pre-compiled regex patterns for performance
+var (
+	dashCommentRe  = regexp.MustCompile(`^\s*--\s*(.+)$`)
+	blockCommentRe = regexp.MustCompile(`^\s*/\*\s*(.+?)\s*\*/`)
+	fromRe         = regexp.MustCompile(`(?i)\bFROM\s+([a-zA-Z_][a-zA-Z0-9_.]*)(?:\s+(?:AS\s+)?[a-zA-Z_][a-zA-Z0-9_]*)?`)
+	updateRe       = regexp.MustCompile(`(?i)\bUPDATE\s+([a-zA-Z_][a-zA-Z0-9_.]*)`)
+	deleteRe       = regexp.MustCompile(`(?i)\bDELETE\s+FROM\s+([a-zA-Z_][a-zA-Z0-9_.]*)`)
+	insertRe       = regexp.MustCompile(`(?i)\bINSERT\s+INTO\s+([a-zA-Z_][a-zA-Z0-9_.]*)`)
+)
+
 // ResultTab represents a single query result tab
 type ResultTab struct {
 	ID        int
@@ -29,7 +39,6 @@ type ResultTabs struct {
 	activeIdx int
 	nextID    int
 	Theme     theme.Theme
-	Width     int
 }
 
 // NewResultTabs creates a new result tabs manager
@@ -64,10 +73,6 @@ func (rt *ResultTabs) AddResult(sql string, result models.QueryResult) {
 	// Remove oldest if exceeding max
 	if len(rt.tabs) > MaxResultTabs {
 		rt.tabs = rt.tabs[1:]
-		// Adjust active index
-		if rt.activeIdx > 0 {
-			rt.activeIdx--
-		}
 	}
 
 	// Set new tab as active
@@ -98,17 +103,15 @@ func (rt *ResultTabs) generateTitle(sql string, result models.QueryResult) strin
 // extractCommentTitle extracts title from SQL comment (-- title or /* title */)
 func (rt *ResultTabs) extractCommentTitle(sql string) string {
 	// Match -- comment at start
-	dashComment := regexp.MustCompile(`^\s*--\s*(.+)$`)
 	lines := strings.Split(sql, "\n")
 	if len(lines) > 0 {
-		if matches := dashComment.FindStringSubmatch(lines[0]); len(matches) > 1 {
+		if matches := dashCommentRe.FindStringSubmatch(lines[0]); len(matches) > 1 {
 			return strings.TrimSpace(matches[1])
 		}
 	}
 
 	// Match /* comment */ at start
-	blockComment := regexp.MustCompile(`^\s*/\*\s*(.+?)\s*\*/`)
-	if matches := blockComment.FindStringSubmatch(sql); len(matches) > 1 {
+	if matches := blockCommentRe.FindStringSubmatch(sql); len(matches) > 1 {
 		return strings.TrimSpace(matches[1])
 	}
 
@@ -120,9 +123,7 @@ func (rt *ResultTabs) extractTableName(sql string) string {
 	upperSQL := strings.ToUpper(sql)
 
 	// SELECT ... FROM table
-	fromRegex := regexp.MustCompile(`(?i)\bFROM\s+([a-zA-Z_][a-zA-Z0-9_.]*)` +
-		`(?:\s+(?:AS\s+)?[a-zA-Z_][a-zA-Z0-9_]*)?`)
-	if matches := fromRegex.FindStringSubmatch(sql); len(matches) > 1 {
+	if matches := fromRe.FindStringSubmatch(sql); len(matches) > 1 {
 		tableName := matches[1]
 		// Check for JOIN
 		if strings.Contains(upperSQL, "JOIN") {
@@ -132,20 +133,17 @@ func (rt *ResultTabs) extractTableName(sql string) string {
 	}
 
 	// UPDATE table
-	updateRegex := regexp.MustCompile(`(?i)\bUPDATE\s+([a-zA-Z_][a-zA-Z0-9_.]*)`)
-	if matches := updateRegex.FindStringSubmatch(sql); len(matches) > 1 {
+	if matches := updateRe.FindStringSubmatch(sql); len(matches) > 1 {
 		return "UPDATE " + matches[1]
 	}
 
 	// DELETE FROM table
-	deleteRegex := regexp.MustCompile(`(?i)\bDELETE\s+FROM\s+([a-zA-Z_][a-zA-Z0-9_.]*)`)
-	if matches := deleteRegex.FindStringSubmatch(sql); len(matches) > 1 {
+	if matches := deleteRe.FindStringSubmatch(sql); len(matches) > 1 {
 		return "DELETE " + matches[1]
 	}
 
 	// INSERT INTO table
-	insertRegex := regexp.MustCompile(`(?i)\bINSERT\s+INTO\s+([a-zA-Z_][a-zA-Z0-9_.]*)`)
-	if matches := insertRegex.FindStringSubmatch(sql); len(matches) > 1 {
+	if matches := insertRe.FindStringSubmatch(sql); len(matches) > 1 {
 		return "INSERT " + matches[1]
 	}
 
