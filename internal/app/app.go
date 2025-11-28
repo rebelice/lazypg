@@ -62,11 +62,7 @@ type App struct {
 	commandPalette     *components.CommandPalette
 	commandRegistry    *commands.Registry
 
-	// Quick query
-	showQuickQuery bool
-	quickQuery     *components.QuickQuery
-
-	// SQL Editor (replaces Quick Query)
+	// SQL Editor
 	sqlEditor        *components.SQLEditor
 	resultTabs       *components.ResultTabs
 	sqlEditorFocused bool // true when SQL editor has focus
@@ -230,7 +226,6 @@ func New(cfg *config.Config) *App {
 		treeView:          components.NewTreeView(emptyRoot, th),
 		commandRegistry:   registry,
 		commandPalette:    components.NewCommandPalette(th),
-		quickQuery:        components.NewQuickQuery(th),
 		sqlEditor:         components.NewSQLEditor(th),
 		resultTabs:        components.NewResultTabs(th),
 		historyStore:      historyStore,
@@ -305,8 +300,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case commands.QuickQueryCommandMsg:
-		// Open quick query mode
-		a.showQuickQuery = true
+		// Open SQL editor (expand if collapsed)
+		if !a.sqlEditor.IsExpanded() {
+			a.sqlEditor.Expand()
+		}
+		a.sqlEditorFocused = true
 		return a, nil
 
 	case commands.QueryEditorCommandMsg:
@@ -637,11 +635,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.handleCommandPalette(msg)
 		}
 
-		// Handle quick query if visible
-		if a.showQuickQuery {
-			return a.handleQuickQuery(msg)
-		}
-
 		// Handle filter builder input
 		if a.showFilterBuilder {
 			return a.handleFilterBuilder(msg)
@@ -736,8 +729,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 
 		case "ctrl+p":
-			// Open quick query
-			a.showQuickQuery = true
+			// Open SQL editor (expand if collapsed)
+			if !a.sqlEditor.IsExpanded() {
+				a.sqlEditor.Expand()
+			}
+			a.sqlEditorFocused = true
 			return a, nil
 		case "ctrl+k":
 			// Open unified command palette
@@ -1436,20 +1432,6 @@ func (a *App) renderNormalView() string {
 		bottomBar,
 	)
 
-	// If quick query is showing, replace bottom bar with it
-	if a.showQuickQuery {
-		a.quickQuery.Width = a.state.Width
-		quickQueryView := a.quickQuery.View()
-
-		// Replace bottom bar with quick query
-		mainView = lipgloss.JoinVertical(
-			lipgloss.Left,
-			topBar,
-			panels,
-			quickQueryView,
-		)
-	}
-
 	// Render filter builder if visible
 	if a.showFilterBuilder {
 		mainView = lipgloss.Place(
@@ -2142,25 +2124,6 @@ func (a *App) handleCommandPalette(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if selected.Action != nil {
 			return a, selected.Action
 		}
-	}
-
-	return a, cmd
-}
-
-// handleQuickQuery handles key events when quick query is visible
-func (a *App) handleQuickQuery(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
-	a.quickQuery, cmd = a.quickQuery.Update(msg)
-
-	// Check if we should close
-	if msg.String() == "esc" || msg.String() == "ctrl+c" {
-		a.showQuickQuery = false
-		return a, nil
-	}
-
-	// Execute query if Enter was pressed
-	if msg.String() == "enter" {
-		a.showQuickQuery = false
 	}
 
 	return a, cmd
