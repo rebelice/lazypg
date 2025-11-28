@@ -843,6 +843,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Handle Vim motion (number prefixes, g, G, etc.)
 				// This must come before individual key handling
 				if a.tableView.HandleVimMotion(msg.String()) {
+					// Check if we need to load more data after vim motion
+					if cmd := a.checkLazyLoad(); cmd != nil {
+						return a, cmd
+					}
 					return a, nil
 				}
 
@@ -852,23 +856,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a, nil
 				case "down":
 					a.tableView.MoveSelection(1)
-
-					// Check if we need to load more data (lazy loading)
-					if a.tableView.SelectedRow >= len(a.tableView.Rows)-10 &&
-						len(a.tableView.Rows) < a.tableView.TotalRows &&
-						a.currentTable != "" {
-						// Parse schema and table from currentTable
-						parts := strings.Split(a.currentTable, ".")
-						if len(parts) == 2 {
-							return a, func() tea.Msg {
-								return LoadTableDataMsg{
-									Schema: parts[0],
-									Table:  parts[1],
-									Offset: len(a.tableView.Rows),
-									Limit:  100,
-								}
-							}
-						}
+					if cmd := a.checkLazyLoad(); cmd != nil {
+						return a, cmd
 					}
 					return a, nil
 				case "left", "h":
@@ -898,6 +887,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a, nil
 				case "ctrl+d":
 					a.tableView.PageDown()
+					if cmd := a.checkLazyLoad(); cmd != nil {
+						return a, cmd
+					}
 					return a, nil
 				case "s":
 					// Sort by current column
@@ -1093,6 +1085,31 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.updatePanelDimensions()
 	}
 	return a, nil
+}
+
+// checkLazyLoad checks if we need to load more data and returns a command if so
+func (a *App) checkLazyLoad() tea.Cmd {
+	// Check if we need to load more data (lazy loading)
+	if a.tableView.SelectedRow >= len(a.tableView.Rows)-10 &&
+		len(a.tableView.Rows) < a.tableView.TotalRows &&
+		a.currentTable != "" {
+		// Parse schema and table from currentTable
+		parts := strings.Split(a.currentTable, ".")
+		if len(parts) == 2 {
+			return func() tea.Msg {
+				return LoadTableDataMsg{
+					Schema:     parts[0],
+					Table:      parts[1],
+					Offset:     len(a.tableView.Rows),
+					Limit:      100,
+					SortColumn: a.tableView.GetSortColumn(),
+					SortDir:    a.tableView.GetSortDirection(),
+					NullsFirst: a.tableView.GetNullsFirst(),
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // View implements tea.Model
