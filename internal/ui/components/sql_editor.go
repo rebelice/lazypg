@@ -2,7 +2,9 @@ package components
 
 import (
 	"strings"
+	"unicode"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/rebeliceyang/lazypg/internal/ui/theme"
 )
 
@@ -259,4 +261,154 @@ func (e *SQLEditor) DeleteCharAfter() {
 		// Remove next line
 		e.lines = append(e.lines[:e.cursorRow+1], e.lines[e.cursorRow+2:]...)
 	}
+}
+
+// SQL keywords for syntax highlighting
+var sqlKeywords = map[string]bool{
+	"SELECT": true, "FROM": true, "WHERE": true, "AND": true, "OR": true,
+	"INSERT": true, "INTO": true, "VALUES": true, "UPDATE": true, "SET": true,
+	"DELETE": true, "CREATE": true, "TABLE": true, "DROP": true, "ALTER": true,
+	"INDEX": true, "VIEW": true, "JOIN": true, "LEFT": true, "RIGHT": true,
+	"INNER": true, "OUTER": true, "FULL": true, "ON": true, "AS": true,
+	"ORDER": true, "BY": true, "GROUP": true, "HAVING": true, "LIMIT": true,
+	"OFFSET": true, "UNION": true, "ALL": true, "DISTINCT": true, "CASE": true,
+	"WHEN": true, "THEN": true, "ELSE": true, "END": true, "NULL": true,
+	"NOT": true, "IN": true, "EXISTS": true, "BETWEEN": true, "LIKE": true,
+	"IS": true, "TRUE": true, "FALSE": true, "ASC": true, "DESC": true,
+	"PRIMARY": true, "KEY": true, "FOREIGN": true, "REFERENCES": true,
+	"CONSTRAINT": true, "UNIQUE": true, "CHECK": true, "DEFAULT": true,
+	"CASCADE": true, "NULLS": true, "FIRST": true, "LAST": true,
+	"BEGIN": true, "COMMIT": true, "ROLLBACK": true, "TRANSACTION": true,
+	"WITH": true, "RECURSIVE": true, "RETURNING": true, "COALESCE": true,
+	"CAST": true, "COUNT": true, "SUM": true, "AVG": true, "MIN": true, "MAX": true,
+}
+
+// TokenType represents the type of a syntax token
+type TokenType int
+
+const (
+	TokenText TokenType = iota
+	TokenKeyword
+	TokenString
+	TokenNumber
+	TokenComment
+	TokenOperator
+)
+
+// Token represents a syntax-highlighted token
+type Token struct {
+	Type  TokenType
+	Value string
+}
+
+// tokenizeLine tokenizes a single line for syntax highlighting
+func (e *SQLEditor) tokenizeLine(line string) []Token {
+	var tokens []Token
+	i := 0
+
+	for i < len(line) {
+		// Skip whitespace
+		if unicode.IsSpace(rune(line[i])) {
+			start := i
+			for i < len(line) && unicode.IsSpace(rune(line[i])) {
+				i++
+			}
+			tokens = append(tokens, Token{Type: TokenText, Value: line[start:i]})
+			continue
+		}
+
+		// Comment (-- to end of line)
+		if i+1 < len(line) && line[i:i+2] == "--" {
+			tokens = append(tokens, Token{Type: TokenComment, Value: line[i:]})
+			break
+		}
+
+		// String literal (single quotes)
+		if line[i] == '\'' {
+			start := i
+			i++
+			for i < len(line) {
+				if line[i] == '\'' {
+					if i+1 < len(line) && line[i+1] == '\'' {
+						// Escaped quote
+						i += 2
+					} else {
+						i++
+						break
+					}
+				} else {
+					i++
+				}
+			}
+			tokens = append(tokens, Token{Type: TokenString, Value: line[start:i]})
+			continue
+		}
+
+		// Number
+		if unicode.IsDigit(rune(line[i])) || (line[i] == '.' && i+1 < len(line) && unicode.IsDigit(rune(line[i+1]))) {
+			start := i
+			for i < len(line) && (unicode.IsDigit(rune(line[i])) || line[i] == '.') {
+				i++
+			}
+			tokens = append(tokens, Token{Type: TokenNumber, Value: line[start:i]})
+			continue
+		}
+
+		// Identifier or keyword
+		if unicode.IsLetter(rune(line[i])) || line[i] == '_' {
+			start := i
+			for i < len(line) && (unicode.IsLetter(rune(line[i])) || unicode.IsDigit(rune(line[i])) || line[i] == '_') {
+				i++
+			}
+			word := line[start:i]
+			if sqlKeywords[strings.ToUpper(word)] {
+				tokens = append(tokens, Token{Type: TokenKeyword, Value: word})
+			} else {
+				tokens = append(tokens, Token{Type: TokenText, Value: word})
+			}
+			continue
+		}
+
+		// Operators
+		if strings.ContainsRune("=<>!+-*/%&|^~", rune(line[i])) {
+			start := i
+			for i < len(line) && strings.ContainsRune("=<>!+-*/%&|^~", rune(line[i])) {
+				i++
+			}
+			tokens = append(tokens, Token{Type: TokenOperator, Value: line[start:i]})
+			continue
+		}
+
+		// Other single characters (parens, commas, etc.)
+		tokens = append(tokens, Token{Type: TokenText, Value: string(line[i])})
+		i++
+	}
+
+	return tokens
+}
+
+// renderTokens renders tokens with syntax highlighting
+func (e *SQLEditor) renderTokens(tokens []Token) string {
+	var result strings.Builder
+
+	for _, token := range tokens {
+		var style lipgloss.Style
+		switch token.Type {
+		case TokenKeyword:
+			style = lipgloss.NewStyle().Foreground(e.Theme.Keyword).Bold(true)
+		case TokenString:
+			style = lipgloss.NewStyle().Foreground(e.Theme.String)
+		case TokenNumber:
+			style = lipgloss.NewStyle().Foreground(e.Theme.Number)
+		case TokenComment:
+			style = lipgloss.NewStyle().Foreground(e.Theme.Comment).Italic(true)
+		case TokenOperator:
+			style = lipgloss.NewStyle().Foreground(e.Theme.Operator)
+		default:
+			style = lipgloss.NewStyle().Foreground(e.Theme.Foreground)
+		}
+		result.WriteString(style.Render(token.Value))
+	}
+
+	return result.String()
 }
