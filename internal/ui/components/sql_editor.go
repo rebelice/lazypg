@@ -19,6 +19,17 @@ const (
 	SQLEditorLarge                               // 50% of available height
 )
 
+// OpenExternalEditorMsg requests opening an external editor
+type OpenExternalEditorMsg struct {
+	Content string
+}
+
+// ExternalEditorResultMsg contains the result from external editor
+type ExternalEditorResultMsg struct {
+	Content string
+	Error   error
+}
+
 // SQLEditor is a multiline SQL editor component
 type SQLEditor struct {
 	// Content
@@ -613,6 +624,12 @@ func (e *SQLEditor) Update(msg tea.KeyMsg) (*SQLEditor, tea.Cmd) {
 			return e, func() tea.Msg {
 				return ExecuteQueryMsg{SQL: sql}
 			}
+		}
+
+	// External editor
+	case "ctrl+o":
+		return e, func() tea.Msg {
+			return OpenExternalEditorMsg{Content: e.GetContent()}
 		}
 
 	default:

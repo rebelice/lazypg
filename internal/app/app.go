@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -357,6 +358,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Show success notification
 		a.ShowError("Export Complete", fmt.Sprintf("Successfully exported favorites to:\n\n%s\n\nYou can now import this file or share it with others.", path))
+		return a, nil
+
+	case components.OpenExternalEditorMsg:
+		// Open external editor
+		return a, a.openExternalEditor(msg.Content)
+
+	case components.ExternalEditorResultMsg:
+		if msg.Error != nil {
+			a.ShowError("Editor Error", msg.Error.Error())
+			return a, nil
+		}
+		a.sqlEditor.SetContent(msg.Content)
 		return a, nil
 
 	case components.ExecuteQueryMsg:
@@ -2577,5 +2590,46 @@ func (a *App) searchTable(query string) tea.Cmd {
 		}
 
 		return SearchTableResultMsg{Query: query, Data: data}
+	}
+}
+
+// openExternalEditor opens the content in an external editor
+func (a *App) openExternalEditor(content string) tea.Cmd {
+	return func() tea.Msg {
+		editor := os.Getenv("EDITOR")
+		if editor == "" {
+			editor = "vim"
+		}
+
+		// Create temp file
+		tmpFile, err := os.CreateTemp("", "lazypg-*.sql")
+		if err != nil {
+			return components.ExternalEditorResultMsg{Error: err}
+		}
+		defer os.Remove(tmpFile.Name())
+
+		// Write content
+		if _, err := tmpFile.WriteString(content); err != nil {
+			return components.ExternalEditorResultMsg{Error: err}
+		}
+		tmpFile.Close()
+
+		// Open editor
+		cmd := exec.Command(editor, tmpFile.Name())
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		if err := cmd.Run(); err != nil {
+			return components.ExternalEditorResultMsg{Error: err}
+		}
+
+		// Read result
+		result, err := os.ReadFile(tmpFile.Name())
+		if err != nil {
+			return components.ExternalEditorResultMsg{Error: err}
+		}
+
+		return components.ExternalEditorResultMsg{Content: string(result)}
 	}
 }
