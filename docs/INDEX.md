@@ -21,7 +21,8 @@ Complete documentation for lazypg, a modern Terminal User Interface (TUI) client
 #### Global
 | Key | Action |
 |-----|--------|
-| `Ctrl+P` | Open command palette |
+| `Ctrl+K` | Open command palette |
+| `Ctrl+E` | Open SQL editor |
 | `Tab` | Switch between panels |
 | `?` | Show help |
 | `q` | Quit |

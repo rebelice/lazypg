@@ -7,7 +7,7 @@ A fast, keyboard-driven Terminal User Interface (TUI) for PostgreSQL, inspired b
 ## Features
 
 - **Keyboard-First Navigation** - Vim-style keybindings (`hjkl`, `g/G`, etc.)
-- **Command Palette** - Quick access to all features via `Ctrl+P`
+- **Command Palette** - Quick access to all features via `Ctrl+K`
 - **Interactive Filtering** - Build complex WHERE clauses visually
 - **JSONB Support** - View and navigate JSONB data with tree view
 - **Query Favorites** - Save and organize frequently used queries
@@ -45,7 +45,8 @@ make build
 | `hjkl` / Arrows | Navigate |
 | `Tab` | Switch panels |
 | `Enter` | Select / Expand |
-| `Ctrl+P` | Command palette |
+| `Ctrl+K` | Command palette |
+| `Ctrl+E` | SQL editor |
 | `f` | Open filter builder |
 | `j` | JSONB viewer (on JSONB cell) |
 | `c` | Connect to database |
