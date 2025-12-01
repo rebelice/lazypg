@@ -388,13 +388,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case commands.QueryEditorCommandMsg:
-		// TODO: Future task
+		// External query editor - planned feature
 		a.ShowError("Not Implemented", "Query editor is a future enhancement")
 		return a, nil
 
 	case commands.HistoryCommandMsg:
-		// TODO: Implement in Task 7
-		a.ShowError("Not Implemented", "Query history will be implemented in Task 7")
+		// Query history browsing - planned feature
+		a.ShowError("Not Implemented", "Query history browsing is planned for a future release")
 		return a, nil
 
 	case commands.FavoritesCommandMsg:

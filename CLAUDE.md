@@ -1,215 +1,158 @@
-# Development Notes for AI Assistants
+# AI Assistant Development Guide
 
-This document contains critical lessons learned and best practices for AI assistants working on this project.
+This document provides guidance for AI assistants (Claude, GPT, etc.) working on this codebase. It documents key patterns, common pitfalls, and project-specific conventions.
 
-## Critical: Bubble Tea / Lipgloss Width Calculation
+## Project Overview
 
-**⚠️ ALWAYS USE `GetHorizontalFrameSize()` - DON'T CALCULATE MANUALLY!**
+lazypg is a terminal UI client for PostgreSQL built with:
+- [Bubble Tea](https://github.com/charmbracelet/bubbletea) - TUI framework
+- [Lip Gloss](https://github.com/charmbracelet/lipgloss) - Terminal styling
+- [pgx](https://github.com/jackc/pgx) - PostgreSQL driver
 
-**⚠️⚠️⚠️ THE CORRECT WAY: Use lipgloss built-in methods for frame size calculation!**
+## Code Organization
 
-### The Problem
+```
+lazypg/
+├── cmd/lazypg/          # Main entry point
+├── internal/
+│   ├── app/             # Main application logic
+│   ├── ui/components/   # Reusable UI components
+│   ├── ui/theme/        # Color themes
+│   ├── db/              # Database operations
+│   ├── models/          # Data structures
+│   └── ...              # Other internal packages
+├── config/              # Default configuration
+└── docs/                # Documentation
+```
 
-When using `lipgloss` borders with `Width()` or `MaxWidth()`, the border and padding are rendered **outside** the content area, causing the total rendered width to exceed expectations and result in cut-off borders.
+## Critical: Lipgloss Width Calculation
 
-**THE FUNDAMENTAL MISTAKE:** Setting MaxWidth without considering the actual terminal width. Even if content fits, borders can still overflow!
+When using `lipgloss` borders with `Width()` or `MaxWidth()`, borders and padding render **outside** the content area. This causes overflow if not handled correctly.
 
-### THE CORRECT METHOD: Use GetHorizontalFrameSize()
+### The Correct Pattern
 
-**✅ CORRECT APPROACH (Using lipgloss methods):**
+Always use `GetHorizontalFrameSize()` to calculate available content width:
+
 ```go
-// Define your style FIRST
+// Define style FIRST
 containerStyle := lipgloss.NewStyle().
     Border(lipgloss.RoundedBorder()).
-    BorderForeground(lipgloss.Color("#cba6f7")).
     Padding(1, 2)
 
-// Calculate content width using GetHorizontalFrameSize()
-maxWidth := 80 // Terminal width
-if windowWidth < maxWidth {
-    maxWidth = windowWidth
-}
-contentWidth := maxWidth - containerStyle.GetHorizontalFrameSize()
+// Calculate content width
+contentWidth := terminalWidth - containerStyle.GetHorizontalFrameSize()
 
-// Now render with calculated content width
+// Render with calculated width
 content := renderContent(contentWidth)
 return containerStyle.Render(content)
 ```
 
-**Why This Works:**
-- `GetHorizontalFrameSize()` returns the EXACT width used by borders, padding, and margins
-- No manual calculation needed - lipgloss knows its own sizes!
-- Adapts automatically if you change border or padding styles
+### Common Mistake
 
-**❌ WRONG APPROACH (Manual Calculation):**
 ```go
-// DON'T DO THIS - Prone to errors!
+// DON'T DO THIS - width doesn't account for frame
 containerStyle := lipgloss.NewStyle().
     Border(lipgloss.RoundedBorder()).
     Padding(1, 2).
-    MaxWidth(76)  // Manually calculated, easy to get wrong
-
-// Problems:
-// 1. Have to manually track border (2) + padding (4) + margin
-// 2. Easy to forget to update when style changes
-// 3. MaxWidth doesn't prevent overflow - still need to calculate!
+    Width(80)  // Will overflow by 6 chars!
 ```
 
-**Key Insight:**
-Using `MaxWidth()` alone does NOT solve the problem! You still need to calculate the correct content width by subtracting frame sizes.
+### Nested Components
 
-### Safe Content Width Calculation
-
-For a bordered container with padding that must fit within terminal width:
+Pass content width down through component hierarchy:
 
 ```go
-// Target: Fit in 80-char terminal
-// With Border(2) + Padding(4) = 6 extra chars
-// Safe MaxWidth = 80 - 6 - safety_margin(4-10)
-MaxWidth(70)  // Leaves 10-char safety margin for emojis, unicode, etc.
+// Parent calculates and passes width
+contentWidth := maxWidth - parentStyle.GetHorizontalFrameSize()
+childContent := child.Render(contentWidth)
+
+// Child subtracts its own frame
+childContentWidth := contentWidth - childStyle.GetHorizontalFrameSize()
 ```
 
-### Best Practices
+## Performance Considerations
 
-1. **Use MaxWidth() instead of Width()**
-   - `Width()` forces exact content width (can cause overflow)
-   - `MaxWidth()` constrains maximum width (allows content to shrink)
+### Style Caching
 
-2. **Conservative content width calculation**
-   ```go
-   safeContentWidth = targetWidth - padding - border - safetyMargin(8-10)
-   ```
+Create styles once and reuse them. Don't create new `lipgloss.Style` objects in render loops:
 
-3. **Test with longest possible text**
-   - Help text, titles, status messages
-   - Include emojis (can be 2+ chars wide in terminal)
-   - Account for Unicode characters
-
-4. **Add width comments**
-   ```go
-   // Keep under 68 chars to fit MaxWidth(76) with Padding(1,2)
-   helpText := "Short text here"
-   ```
-
-5. **Common pitfalls to avoid**
-   - ❌ Setting `Width(80)` on bordered container
-   - ❌ Not accounting for emoji width
-   - ❌ Ignoring padding in calculations
-   - ❌ Using exact measurements without safety margin
-
-### Real Example from This Project
-
-**Before (Border Cut Off):**
 ```go
-containerStyle := lipgloss.NewStyle().
-    Border(lipgloss.RoundedBorder()).
-    Padding(1, 2).
-    MaxWidth(76)
+// GOOD: Cache styles in struct
+type MyComponent struct {
+    cachedStyles *myStyles
+}
 
-// Help text: 78 chars
-sections = append(sections, "↑↓: Select  │  Tab: Switch  │  Enter: Connect  │  m: Manual  │  Esc: Cancel")
-// Result: Right border cut off (76 + 4 + 2 = 82 chars total)
+func (c *MyComponent) initStyles() {
+    c.cachedStyles = &myStyles{
+        header: lipgloss.NewStyle().Bold(true),
+        // ...
+    }
+}
+
+// BAD: Creating styles on every render
+func (c *MyComponent) View() string {
+    style := lipgloss.NewStyle().Bold(true)  // Don't do this
+}
 ```
 
-**After (Fixed):**
+### Mouse Support
+
+Use [bubblezone](https://github.com/lrstanley/bubblezone) for mouse click detection:
+
 ```go
-containerStyle := lipgloss.NewStyle().
-    Border(lipgloss.RoundedBorder()).
-    Padding(1, 2).
-    MaxWidth(76)
+// Mark clickable zones
+zone.Mark("button-id", buttonContent)
 
-// Help text: 62 chars (14 char safety margin)
-sections = append(sections, "↑↓: Navigate │ Tab: Switch │ Enter: Connect │ m: Manual")
-// Result: Fits perfectly (76 + 4 + 2 = 82 → reduced to 72 effective width)
+// Check clicks in Update
+if zone.Get("button-id").InBounds(mouseMsg) {
+    // Handle click
+}
 ```
 
-### Nested Borders - Using GetHorizontalFrameSize() for Each Layer
-
-**✅ CORRECT WAY (Using GetHorizontalFrameSize for nested components):**
+Initialize bubblezone in tests:
 ```go
-// Outer container
-containerStyle := lipgloss.NewStyle().
-    Border(lipgloss.RoundedBorder()).
-    Padding(1, 2)
-
-maxWidth := 80 // Terminal width
-contentWidth := maxWidth - containerStyle.GetHorizontalFrameSize()
-// contentWidth is now the available space for inner content
-
-// Inner search box (nested)
-searchBoxStyle := lipgloss.NewStyle().
-    Border(lipgloss.RoundedBorder()).
-    Padding(0, 1)
-
-// Calculate search input width from parent's content width
-searchInputWidth := contentWidth - searchBoxStyle.GetHorizontalFrameSize() - 4 // 4 for emoji + margins
-searchInput.Width = searchInputWidth
-
-// Render
-searchBox := searchBoxStyle.Render("🔍 " + searchInput.View())
-content := titleText + "\n" + searchBox + "\n" + moreContent
-return containerStyle.Render(content)
+func init() {
+    zone.NewGlobal()
+}
 ```
 
-**Why This Works:**
-1. Each layer uses `GetHorizontalFrameSize()` to know its own frame width
-2. Parent calculates content width and passes it to children
-3. Children subtract their own frame size from parent's content width
-4. No manual calculations - all sizes come from lipgloss itself!
-
-**Real Example from This Project:**
-```go
-// In View() method:
-containerStyle := lipgloss.NewStyle().Border(...).Padding(1, 2)
-contentWidth := maxWidth - containerStyle.GetHorizontalFrameSize()
-content := c.renderDiscoveryMode(contentWidth) // Pass width down
-return containerStyle.Render(content)
-
-// In renderDiscoveryMode(contentWidth int):
-searchBoxStyle := lipgloss.NewStyle().Border(...).Padding(0, 1)
-searchInputWidth := contentWidth - searchBoxStyle.GetHorizontalFrameSize() - 4
-c.searchInput.Width = searchInputWidth
-return searchBoxStyle.Render("🔍 " + c.searchInput.View())
-```
-
-**The Critical Lesson:**
-1. **Define styles WITHOUT MaxWidth** - let content determine size
-2. **Use GetHorizontalFrameSize()** for each styled component
-3. **Pass content width down** through render methods
-4. **Each child subtracts its frame size** from parent's content width
-
-### Quick Reference Table
-
-| Terminal Width | Border | Padding | Safe MaxWidth | Safe Content |
-|----------------|--------|---------|---------------|--------------|
-| 80             | 2      | 4       | 70            | 66           |
-| 100            | 2      | 4       | 90            | 86           |
-| 120            | 2      | 4       | 110           | 106          |
-
-**Formula:** Safe Content = Terminal Width - Border(2) - Padding(4) - Safety Margin(4-10)
-
----
-
-## Other Best Practices
-
-### Code Organization
-
-- Keep UI components in `internal/ui/components/`
-- Keep business logic in `internal/` packages
-- Use models package for shared data structures
+## Conventions
 
 ### Error Handling
 
-- Always log errors but don't crash on non-critical failures
-- Provide user-friendly error messages in UI overlays
+- Log errors but don't crash on non-critical failures
+- Show user-friendly messages in UI overlays
 - Use `log.Printf("Warning: ...")` for non-fatal errors
 
 ### Testing
 
-- Test UI changes at 80-char terminal width (most common)
-- Test with actual PostgreSQL instances
-- Verify password storage works across restarts
+- Initialize `zone.NewGlobal()` in test files that call `View()` methods
+- Test UI at 80-char terminal width
+- Run `go test ./...` before committing
 
----
+### Commits
 
-*Last updated: 2025-01-11*
+- Use conventional commit format: `feat:`, `fix:`, `perf:`, etc.
+- Keep commits focused and atomic
+
+## Common Tasks
+
+### Adding a New UI Component
+
+1. Create file in `internal/ui/components/`
+2. Implement `tea.Model` interface (Init, Update, View)
+3. Add style caching with `initStyles()` method
+4. Add zone marks for mouse support if needed
+5. Add tests with `zone.NewGlobal()` in init
+
+### Adding a New Command
+
+1. Add command type in `internal/commands/commands.go`
+2. Register in command registry
+3. Handle message in `internal/app/app.go` Update method
+
+## Resources
+
+- [Bubble Tea Documentation](https://github.com/charmbracelet/bubbletea)
+- [Lip Gloss Documentation](https://github.com/charmbracelet/lipgloss)
+- [Project Documentation](docs/INDEX.md)

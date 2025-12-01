@@ -81,8 +81,7 @@ func (b *Builder) buildCondition(cond models.FilterCondition, paramIndex int) (s
 	case models.OpLike, models.OpILike:
 		return fmt.Sprintf("%s %s $%d", column, cond.Operator, paramIndex), []interface{}{cond.Value}, nil
 	case models.OpIn, models.OpNotIn:
-		// TODO: Properly implement IN/NOT IN with array expansion
-		// Current implementation is invalid SQL and needs proper handling
+		// IN/NOT IN requires array expansion - not yet implemented
 		return "", nil, fmt.Errorf("IN/NOT IN operators not yet implemented")
 	case models.OpContains:
 		// JSONB @> operator

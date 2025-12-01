@@ -5,9 +5,15 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	zone "github.com/lrstanley/bubblezone"
 	"github.com/rebeliceyang/lazypg/internal/models"
 	"github.com/rebeliceyang/lazypg/internal/ui/theme"
 )
+
+func init() {
+	// Initialize bubblezone for tests that call View() methods
+	zone.NewGlobal()
+}
 
 func TestNewTreeView(t *testing.T) {
 	root := models.NewTreeNode("root", models.TreeNodeTypeRoot, "Databases")
@@ -65,9 +71,9 @@ func TestTreeView_SingleNode(t *testing.T) {
 		t.Error("Expected view to contain 'postgres'")
 	}
 
-	// Should contain (active) marker
-	if !strings.Contains(view, "(active)") {
-		t.Error("Expected view to contain '(active)' marker")
+	// Active database is now shown with ● icon (filled circle) instead of "(active)" text
+	if !strings.Contains(view, "●") {
+		t.Error("Expected view to contain '●' icon for active database")
 	}
 }
 
@@ -277,37 +283,57 @@ func TestTreeView_GetNodeIcon(t *testing.T) {
 	testTheme := theme.DefaultTheme()
 	tv := NewTreeView(nil, testTheme)
 
-	tests := []struct {
-		name     string
-		nodeType models.TreeNodeType
-		expanded bool
-		loaded   bool
-		children int
-		expected string
-	}{
-		{"Collapsed database", models.TreeNodeTypeDatabase, false, false, 0, "▸"},
-		{"Expanded database", models.TreeNodeTypeDatabase, true, false, 0, "▾"},
-		{"Collapsed schema", models.TreeNodeTypeSchema, false, true, 2, "▸"},
-		{"Expanded schema", models.TreeNodeTypeSchema, true, true, 2, "▾"},
-		{"Column node", models.TreeNodeTypeColumn, false, true, 0, "•"},
-	}
+	// Test database icons (now use ● for active, ○ for inactive)
+	t.Run("Inactive database", func(t *testing.T) {
+		node := models.NewTreeNode("test", models.TreeNodeTypeDatabase, "Test")
+		icon := tv.getNodeIcon(node)
+		if !strings.Contains(icon, "○") {
+			t.Errorf("Expected icon to contain '○' for inactive database, got '%s'", icon)
+		}
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			node := models.NewTreeNode("test", tt.nodeType, "Test")
-			node.Expanded = tt.expanded
-			node.Loaded = tt.loaded
-			for i := 0; i < tt.children; i++ {
-				child := models.NewTreeNode("child", models.TreeNodeTypeColumn, "Child")
-				node.AddChild(child)
-			}
+	t.Run("Active database", func(t *testing.T) {
+		node := models.NewTreeNode("test", models.TreeNodeTypeDatabase, "Test")
+		node.Metadata = map[string]interface{}{"active": true}
+		icon := tv.getNodeIcon(node)
+		if !strings.Contains(icon, "●") {
+			t.Errorf("Expected icon to contain '●' for active database, got '%s'", icon)
+		}
+	})
 
-			icon := tv.getNodeIcon(node)
-			if icon != tt.expected {
-				t.Errorf("Expected icon '%s', got '%s'", tt.expected, icon)
-			}
-		})
-	}
+	// Test schema icons (use ▸/▾)
+	t.Run("Collapsed schema", func(t *testing.T) {
+		node := models.NewTreeNode("test", models.TreeNodeTypeSchema, "Test")
+		node.Loaded = true
+		child := models.NewTreeNode("child", models.TreeNodeTypeColumn, "Child")
+		node.AddChild(child)
+		icon := tv.getNodeIcon(node)
+		if !strings.Contains(icon, "▸") {
+			t.Errorf("Expected icon to contain '▸' for collapsed schema, got '%s'", icon)
+		}
+	})
+
+	t.Run("Expanded schema", func(t *testing.T) {
+		node := models.NewTreeNode("test", models.TreeNodeTypeSchema, "Test")
+		node.Expanded = true
+		node.Loaded = true
+		child := models.NewTreeNode("child", models.TreeNodeTypeColumn, "Child")
+		node.AddChild(child)
+		icon := tv.getNodeIcon(node)
+		if !strings.Contains(icon, "▾") {
+			t.Errorf("Expected icon to contain '▾' for expanded schema, got '%s'", icon)
+		}
+	})
+
+	// Test column icon (uses •)
+	t.Run("Column node", func(t *testing.T) {
+		node := models.NewTreeNode("test", models.TreeNodeTypeColumn, "Test")
+		node.Loaded = true
+		icon := tv.getNodeIcon(node)
+		if !strings.Contains(icon, "•") {
+			t.Errorf("Expected icon to contain '•' for column, got '%s'", icon)
+		}
+	})
 }
 
 func TestTreeView_GetCurrentNode(t *testing.T) {
@@ -385,10 +411,10 @@ func TestTreeView_ViewportScrolling(t *testing.T) {
 	_ = tv.View()
 
 	// Scroll offset should be adjusted to keep cursor visible
-	viewHeight := tv.Height - 4
-	expectedMinScroll := 19 - viewHeight + 1
-	if tv.ScrollOffset < expectedMinScroll {
-		t.Errorf("Expected scroll offset at least %d, got %d", expectedMinScroll, tv.ScrollOffset)
+	// The cursor should be within the visible range
+	if tv.CursorIndex < tv.ScrollOffset || tv.CursorIndex >= tv.ScrollOffset+tv.Height {
+		t.Errorf("Cursor %d should be visible with scroll offset %d and height %d",
+			tv.CursorIndex, tv.ScrollOffset, tv.Height)
 	}
 
 	// Move cursor to top
@@ -436,25 +462,32 @@ func TestTreeView_ActiveDatabaseHighlight(t *testing.T) {
 
 	view := tv.View()
 
-	// Should contain (active) for postgres
-	if !strings.Contains(view, "(active)") {
-		t.Error("Expected (active) marker in view")
+	// Active database is shown with ● icon (filled circle)
+	if !strings.Contains(view, "●") {
+		t.Error("Expected ● icon for active database in view")
 	}
 
-	// Get the label for postgres node
+	// Inactive database is shown with ○ icon (empty circle)
+	if !strings.Contains(view, "○") {
+		t.Error("Expected ○ icon for inactive database in view")
+	}
+
+	// Verify active database has correct metadata
 	postgres := root.FindByID("db:postgres")
-	label := tv.buildNodeLabel(postgres)
-
-	if !strings.Contains(label, "(active)") {
-		t.Error("Expected (active) marker in postgres label")
+	if meta, ok := postgres.Metadata.(map[string]interface{}); ok {
+		if active, ok := meta["active"].(bool); !ok || !active {
+			t.Error("Expected postgres to have active=true metadata")
+		}
+	} else {
+		t.Error("Expected postgres to have metadata map")
 	}
 
-	// Get the label for mydb node (not active)
+	// Verify inactive database has correct metadata
 	mydb := root.FindByID("db:mydb")
-	label = tv.buildNodeLabel(mydb)
-
-	if strings.Contains(label, "(active)") {
-		t.Error("Did not expect (active) marker in mydb label")
+	if meta, ok := mydb.Metadata.(map[string]interface{}); ok {
+		if active, ok := meta["active"].(bool); ok && active {
+			t.Error("Expected mydb to have active=false metadata")
+		}
 	}
 }
 

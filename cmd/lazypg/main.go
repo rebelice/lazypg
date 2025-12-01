@@ -28,9 +28,6 @@ func main() {
 
 	app := app.New(cfg)
 
-	// TODO: Trigger discovery in background
-	// This will be implemented in connection UI
-
 	opts := []tea.ProgramOption{tea.WithAltScreen()}
 	if cfg.UI.MouseEnabled {
 		opts = append(opts, tea.WithMouseCellMotion())
