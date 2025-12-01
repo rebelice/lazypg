@@ -1236,6 +1236,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Update tree view with loaded data
 		a.treeView.Root = msg.Root
+
+		// Auto-expand to schema level: Root -> Database -> Schemas
+		if msg.Root != nil {
+			msg.Root.Expanded = true
+			for _, dbNode := range msg.Root.Children {
+				dbNode.Expanded = true
+				// Expand each schema node
+				for _, schemaNode := range dbNode.Children {
+					schemaNode.Expanded = true
+				}
+			}
+		}
 		return a, nil
 
 	case components.TreeNodeSelectedMsg:
