@@ -668,8 +668,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.handleSearchInput(msg)
 		}
 
-		// If SQL editor is focused and expanded, route input there
-		if a.sqlEditorFocused && a.sqlEditor.IsExpanded() {
+		// If SQL editor is focused, route input there
+		if a.sqlEditorFocused {
 			// Handle escape to unfocus
 			if msg.String() == "esc" {
 				a.sqlEditorFocused = false
