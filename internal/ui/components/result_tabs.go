@@ -51,7 +51,7 @@ func NewResultTabs(th theme.Theme) *ResultTabs {
 	}
 }
 
-// AddResult adds a new query result as a tab
+// AddResult adds a new query result as a tab (newest appears on the left)
 func (rt *ResultTabs) AddResult(sql string, result models.QueryResult) {
 	// Create TableView for this result
 	tableView := NewTableView(rt.Theme)
@@ -67,16 +67,16 @@ func (rt *ResultTabs) AddResult(sql string, result models.QueryResult) {
 	}
 	rt.nextID++
 
-	// Add to tabs
-	rt.tabs = append(rt.tabs, tab)
+	// Insert new tab at the beginning (leftmost position)
+	rt.tabs = append([]*ResultTab{tab}, rt.tabs...)
 
-	// Remove oldest if exceeding max
+	// Remove oldest (rightmost) if exceeding max
 	if len(rt.tabs) > MaxResultTabs {
-		rt.tabs = rt.tabs[1:]
+		rt.tabs = rt.tabs[:MaxResultTabs]
 	}
 
-	// Set new tab as active
-	rt.activeIdx = len(rt.tabs) - 1
+	// Set new tab as active (index 0 = leftmost)
+	rt.activeIdx = 0
 }
 
 // generateTitle generates a smart title for the tab
@@ -165,6 +165,15 @@ func (rt *ResultTabs) GetActiveTableView() *TableView {
 		return nil
 	}
 	return tab.TableView
+}
+
+// GetActiveSQL returns the SQL of the active tab
+func (rt *ResultTabs) GetActiveSQL() string {
+	tab := rt.GetActiveTab()
+	if tab == nil {
+		return ""
+	}
+	return tab.SQL
 }
 
 // NextTab switches to the next tab

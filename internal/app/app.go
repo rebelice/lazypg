@@ -719,6 +719,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Previous result tab (when not in SQL editor)
 			if a.resultTabs.HasTabs() && !a.sqlEditorFocused {
 				a.resultTabs.PrevTab()
+				// Sync SQL editor content with the active tab's SQL
+				if sql := a.resultTabs.GetActiveSQL(); sql != "" {
+					a.sqlEditor.SetContent(sql)
+				}
 				return a, nil
 			}
 			// Structure view tab switching (existing behavior)
@@ -732,6 +736,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Next result tab (when not in SQL editor)
 			if a.resultTabs.HasTabs() && !a.sqlEditorFocused {
 				a.resultTabs.NextTab()
+				// Sync SQL editor content with the active tab's SQL
+				if sql := a.resultTabs.GetActiveSQL(); sql != "" {
+					a.sqlEditor.SetContent(sql)
+				}
 				return a, nil
 			}
 			// Structure view tab switching (existing behavior)
@@ -931,8 +939,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Handle table navigation when right panel is focused
 			if a.state.FocusedPanel == models.RightPanel && a.state.ViewMode == models.NormalMode {
-				// Handle preview pane scrolling (when visible) for any tab
-				activeTable := a.structureView.GetActiveTableView()
+				// Get the active table view (Result Tabs, Structure View, or main TableView)
+				activeTable := a.getActiveTableView()
+
+				// Handle preview pane scrolling (when visible)
 				if activeTable != nil && activeTable.PreviewPane != nil && activeTable.PreviewPane.Visible {
 					switch msg.String() {
 					case "ctrl+up":
@@ -944,19 +954,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 
-				// Handle preview pane toggle for all tabs (before routing to structure view)
+				// Handle preview pane toggle
 				if msg.String() == "p" {
-					activeTable := a.structureView.GetActiveTableView()
 					if activeTable != nil {
 						activeTable.TogglePreviewPane()
 					}
 					return a, nil
 				}
 
-				// Handle yank for all tabs (before routing to structure view)
-				// y = copy current cell, Y = copy preview pane content
+				// Handle yank: y = copy current cell, Y = copy preview pane content
 				if msg.String() == "y" {
-					activeTable := a.structureView.GetActiveTableView()
 					if activeTable != nil {
 						row, col := activeTable.GetSelectedCell()
 						if row >= 0 && col >= 0 && row < len(activeTable.Rows) && col < len(activeTable.Rows[row]) {
@@ -969,7 +976,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a, nil
 				}
 				if msg.String() == "Y" {
-					activeTable := a.structureView.GetActiveTableView()
 					if activeTable != nil && activeTable.PreviewPane != nil && activeTable.PreviewPane.Visible {
 						if err := activeTable.PreviewPane.CopyContent(); err == nil {
 							log.Println("Copied preview content to clipboard")
@@ -978,94 +984,107 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a, nil
 				}
 
-				// If structure view is active and not on Data tab, route to structure view
-				if a.currentTab > 0 {
+				// If structure view is active (not on Data tab) and no Result Tabs, route to structure view
+				if a.currentTab > 0 && !a.resultTabs.HasTabs() {
 					a.structureView.Update(msg)
+					return a, nil
+				}
+
+				// Skip navigation handling if no active table
+				if activeTable == nil {
 					return a, nil
 				}
 
 				// Toggle relative line numbers
 				if msg.String() == "ctrl+n" {
-					a.tableView.ToggleRelativeNumbers()
+					activeTable.ToggleRelativeNumbers()
 					return a, nil
 				}
 
 				// Handle Vim motion (number prefixes, g, G, etc.)
 				// This must come before individual key handling
-				if a.tableView.HandleVimMotion(msg.String()) {
-					// Check if we need to load more data after vim motion
-					if cmd := a.checkLazyLoad(); cmd != nil {
-						return a, cmd
+				if activeTable.HandleVimMotion(msg.String()) {
+					// Check if we need to load more data after vim motion (only for main table)
+					if !a.resultTabs.HasTabs() {
+						if cmd := a.checkLazyLoad(); cmd != nil {
+							return a, cmd
+						}
 					}
 					return a, nil
 				}
 
 				switch msg.String() {
 				case "up":
-					a.tableView.MoveSelection(-1)
+					activeTable.MoveSelection(-1)
 					return a, nil
 				case "down":
-					a.tableView.MoveSelection(1)
-					if cmd := a.checkLazyLoad(); cmd != nil {
-						return a, cmd
+					activeTable.MoveSelection(1)
+					if !a.resultTabs.HasTabs() {
+						if cmd := a.checkLazyLoad(); cmd != nil {
+							return a, cmd
+						}
 					}
 					return a, nil
 				case "left", "h":
-					a.tableView.MoveSelectionHorizontal(-1)
+					activeTable.MoveSelectionHorizontal(-1)
 					return a, nil
 				case "right", "l":
-					a.tableView.MoveSelectionHorizontal(1)
+					activeTable.MoveSelectionHorizontal(1)
 					return a, nil
 				case "H":
 					// Jump scroll left (half screen)
-					a.tableView.JumpScrollHorizontal(-1)
+					activeTable.JumpScrollHorizontal(-1)
 					return a, nil
 				case "L":
 					// Jump scroll right (half screen)
-					a.tableView.JumpScrollHorizontal(1)
+					activeTable.JumpScrollHorizontal(1)
 					return a, nil
 				case "0":
 					// Jump to first column
-					a.tableView.JumpToFirstColumn()
+					activeTable.JumpToFirstColumn()
 					return a, nil
 				case "$":
 					// Jump to last column
-					a.tableView.JumpToLastColumn()
+					activeTable.JumpToLastColumn()
 					return a, nil
 				case "ctrl+u":
-					a.tableView.PageUp()
+					activeTable.PageUp()
 					return a, nil
 				case "ctrl+d":
-					a.tableView.PageDown()
-					if cmd := a.checkLazyLoad(); cmd != nil {
-						return a, cmd
+					activeTable.PageDown()
+					if !a.resultTabs.HasTabs() {
+						if cmd := a.checkLazyLoad(); cmd != nil {
+							return a, cmd
+						}
 					}
 					return a, nil
 				case "s":
-					// Sort by current column
-					a.tableView.ToggleSort()
-					// Reload data with new sort
-					if a.currentTable != "" {
-						parts := strings.Split(a.currentTable, ".")
-						if len(parts) == 2 {
-							return a, func() tea.Msg {
-								return LoadTableDataMsg{
-									Schema:     parts[0],
-									Table:      parts[1],
-									Offset:     0,
-									Limit:      100,
-									SortColumn: a.tableView.GetSortColumn(),
-									SortDir:    a.tableView.GetSortDirection(),
-									NullsFirst: a.tableView.GetNullsFirst(),
+					// Sort by current column (only for main table browsing, not result tabs)
+					if !a.resultTabs.HasTabs() {
+						activeTable.ToggleSort()
+						// Reload data with new sort
+						if a.currentTable != "" {
+							parts := strings.Split(a.currentTable, ".")
+							if len(parts) == 2 {
+								return a, func() tea.Msg {
+									return LoadTableDataMsg{
+										Schema:     parts[0],
+										Table:      parts[1],
+										Offset:     0,
+										Limit:      100,
+										SortColumn: activeTable.GetSortColumn(),
+										SortDir:    activeTable.GetSortDirection(),
+										NullsFirst: activeTable.GetNullsFirst(),
+									}
 								}
 							}
 						}
 					}
 					return a, nil
 				case "S":
-					// Toggle NULLS FIRST/LAST
-					if a.tableView.SortColumn >= 0 {
-						a.tableView.ToggleNullsFirst()
+					// Toggle NULLS FIRST/LAST (only for main table browsing)
+					if !a.resultTabs.HasTabs() && activeTable.SortColumn >= 0 {
+						activeTable.ToggleNullsFirst()
 						// Reload data
 						if a.currentTable != "" {
 							parts := strings.Split(a.currentTable, ".")
@@ -1076,9 +1095,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 										Table:      parts[1],
 										Offset:     0,
 										Limit:      100,
-										SortColumn: a.tableView.GetSortColumn(),
-										SortDir:    a.tableView.GetSortDirection(),
-										NullsFirst: a.tableView.GetNullsFirst(),
+										SortColumn: activeTable.GetSortColumn(),
+										SortDir:    activeTable.GetSortDirection(),
+										NullsFirst: activeTable.GetNullsFirst(),
 									}
 								}
 							}
@@ -1086,8 +1105,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					return a, nil
 				case "r":
-					// Reverse sort direction
-					if a.tableView.ReverseSortDirection() {
+					// Reverse sort direction (only for main table browsing)
+					if !a.resultTabs.HasTabs() && activeTable.ReverseSortDirection() {
 						// Reload data with reversed sort
 						if a.currentTable != "" {
 							parts := strings.Split(a.currentTable, ".")
@@ -1098,9 +1117,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 										Table:      parts[1],
 										Offset:     0,
 										Limit:      100,
-										SortColumn: a.tableView.GetSortColumn(),
-										SortDir:    a.tableView.GetSortDirection(),
-										NullsFirst: a.tableView.GetNullsFirst(),
+										SortColumn: activeTable.GetSortColumn(),
+										SortDir:    activeTable.GetSortDirection(),
+										NullsFirst: activeTable.GetNullsFirst(),
 									}
 								}
 							}
@@ -1109,9 +1128,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a, nil
 				case "J":
 					// Open JSONB viewer if cell contains JSONB (uppercase J to avoid conflict with vim down)
-					selectedRow, selectedCol := a.tableView.GetSelectedCell()
-					if selectedRow >= 0 && selectedCol >= 0 && selectedRow < len(a.tableView.Rows) && selectedCol < len(a.tableView.Columns) {
-						cellValue := a.tableView.Rows[selectedRow][selectedCol]
+					selectedRow, selectedCol := activeTable.GetSelectedCell()
+					if selectedRow >= 0 && selectedCol >= 0 && selectedRow < len(activeTable.Rows) && selectedCol < len(activeTable.Columns) {
+						cellValue := activeTable.Rows[selectedRow][selectedCol]
 						if jsonb.IsJSONB(cellValue) {
 							if err := a.jsonbViewer.SetValue(cellValue); err == nil {
 								a.showJSONBViewer = true
@@ -1127,14 +1146,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a, nil
 				case "n":
 					// Next search match
-					if a.tableView.SearchActive {
-						a.tableView.NextMatch()
+					if activeTable.SearchActive {
+						activeTable.NextMatch()
 					}
 					return a, nil
 				case "N":
 					// Previous search match
-					if a.tableView.SearchActive {
-						a.tableView.PrevMatch()
+					if activeTable.SearchActive {
+						activeTable.PrevMatch()
 					}
 					return a, nil
 				case "enter", " ":
@@ -1255,6 +1274,20 @@ func (a *App) checkLazyLoad() tea.Cmd {
 		}
 	}
 	return nil
+}
+
+// getActiveTableView returns the appropriate TableView based on current context:
+// - If Result Tabs has tabs, use the active result tab's TableView
+// - If on structure tabs (columns, constraints, indexes), use structure view's TableView
+// - Otherwise use the main tableView (for Data tab browsing)
+func (a *App) getActiveTableView() *components.TableView {
+	if a.resultTabs.HasTabs() {
+		return a.resultTabs.GetActiveTableView()
+	}
+	if a.currentTab > 0 {
+		return a.structureView.GetActiveTableView()
+	}
+	return a.tableView
 }
 
 // View implements tea.Model
