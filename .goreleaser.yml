@@ -16,6 +16,8 @@ builds:
     goarch:
       - amd64
       - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
 
 archives:
   - format: tar.gz
@@ -38,3 +40,17 @@ changelog:
       - '^docs:'
       - '^test:'
       - '^chore:'
+
+brews:
+  - repository:
+      owner: rebelice
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/rebelice/lazypg"
+    description: "A simple terminal UI for PostgreSQL"
+    license: "MIT"
+    test: |
+      system "#{bin}/lazypg", "--version"
+    install: |
+      bin.install "lazypg"

@@ -87,7 +87,6 @@ Write and execute SQL directly. Results appear in tabs, so you can run multiple 
 ### Homebrew (macOS/Linux)
 
 ```bash
-# Coming soon
 brew install rebelice/tap/lazypg
 ```
 
