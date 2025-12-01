@@ -269,12 +269,13 @@ func (fb *FilterBuilder) updatePreview() {
 func (fb *FilterBuilder) HandleMouseWheel(msg tea.MouseMsg) bool {
 	switch msg.Button {
 	case tea.MouseButtonWheelUp:
-		if fb.editMode == "" {
+		switch fb.editMode {
+		case "":
 			// Navigation mode - scroll conditions
 			if fb.currentIndex > 0 {
 				fb.currentIndex--
 			}
-		} else if fb.editMode == "operator" {
+		case "operator":
 			// Operator mode - scroll operators
 			if fb.operatorIndex > 0 {
 				fb.operatorIndex--
@@ -282,12 +283,13 @@ func (fb *FilterBuilder) HandleMouseWheel(msg tea.MouseMsg) bool {
 		}
 		return true
 	case tea.MouseButtonWheelDown:
-		if fb.editMode == "" {
+		switch fb.editMode {
+		case "":
 			// Navigation mode - scroll conditions
 			if fb.currentIndex < len(fb.filter.RootGroup.Conditions) {
 				fb.currentIndex++
 			}
-		} else if fb.editMode == "operator" {
+		case "operator":
 			// Operator mode - scroll operators
 			if fb.operatorIndex < len(fb.availableOps)-1 {
 				fb.operatorIndex++

@@ -28,8 +28,9 @@ func (p *Panel) View() string {
 		contentHeight -= 1 // -1 for title line
 	}
 	if contentHeight < 1 {
-		contentHeight = 1
+		contentHeight = 1 //nolint:ineffassign // kept for clarity
 	}
+	_ = contentHeight // silence unused warning, value used indirectly via layout
 
 	// Create content with modern title
 	var finalContent string

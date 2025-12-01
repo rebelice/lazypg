@@ -197,6 +197,7 @@ func TestTreeView_ExpandCollapse(t *testing.T) {
 
 	// Collapse with space again
 	tv, cmd = tv.Update(tea.KeyMsg{Type: tea.KeySpace})
+	_ = tv // silence unused warning
 
 	if dbNode.Expanded {
 		t.Error("Expected node to be collapsed after second space")
@@ -261,6 +262,7 @@ func TestTreeView_SelectNode(t *testing.T) {
 
 	// Press enter to select
 	tv, cmd := tv.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_ = tv // silence unused warning
 
 	if cmd == nil {
 		t.Error("Expected select command")
@@ -345,7 +347,7 @@ func TestTreeView_GetCurrentNode(t *testing.T) {
 	// Test at index 0
 	node := tv.GetCurrentNode()
 	if node == nil {
-		t.Error("Expected node at index 0")
+		t.Fatal("Expected node at index 0")
 	}
 	if node.Label != "db1" {
 		t.Errorf("Expected 'db1', got '%s'", node.Label)
@@ -355,7 +357,7 @@ func TestTreeView_GetCurrentNode(t *testing.T) {
 	tv.CursorIndex = 1
 	node = tv.GetCurrentNode()
 	if node == nil {
-		t.Error("Expected node at index 1")
+		t.Fatal("Expected node at index 1")
 	}
 	if node.Label != "db2" {
 		t.Errorf("Expected 'db2', got '%s'", node.Label)
@@ -522,6 +524,7 @@ func TestTreeView_ViKeybindings(t *testing.T) {
 
 	// Test h (left/collapse)
 	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	_ = tv // silence unused warning
 	if dbNode.Expanded {
 		t.Error("Expected node to be collapsed after 'h'")
 	}

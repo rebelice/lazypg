@@ -39,7 +39,7 @@ func NewStore(path string) (*Store, error) {
 	// Create schema
 	_, err = db.Exec(schemaSQL)
 	if err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 
@@ -74,7 +74,7 @@ func (s *Store) GetRecent(limit int) ([]HistoryEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var entries []HistoryEntry
 	for rows.Next() {
@@ -118,7 +118,7 @@ func (s *Store) Search(query string, limit int) ([]HistoryEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var entries []HistoryEntry
 	for rows.Next() {

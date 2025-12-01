@@ -67,7 +67,7 @@ func TestExportToCSV(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open CSV: %v", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	reader := csv.NewReader(file)
 	records, err := reader.ReadAll()
@@ -181,7 +181,7 @@ func TestExportEmptyFavorites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open CSV: %v", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	reader := csv.NewReader(file)
 	records, err := reader.ReadAll()

@@ -17,7 +17,7 @@ func ExportToCSV(favorites []models.Favorite, path string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create CSV file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	writer := csv.NewWriter(file)
 	defer writer.Flush()

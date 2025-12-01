@@ -53,7 +53,7 @@ func ParsePgPass() ([]PgPassEntry, error) {
 		}
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var entries []PgPassEntry
 	scanner := bufio.NewScanner(file)

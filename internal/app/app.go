@@ -236,7 +236,7 @@ func New(cfg *config.Config) *App {
 		homeDir = "."
 	}
 	configDir := filepath.Join(homeDir, ".config", "lazypg")
-	os.MkdirAll(configDir, 0755)
+	_ = os.MkdirAll(configDir, 0755)
 
 	historyPath := filepath.Join(configDir, "history.db")
 	historyStore, err := history.NewStore(historyPath)
@@ -3239,13 +3239,13 @@ func (a *App) openExternalEditor(content string) tea.Cmd {
 		if err != nil {
 			return components.ExternalEditorResultMsg{Error: err}
 		}
-		defer os.Remove(tmpFile.Name())
+		defer func() { _ = os.Remove(tmpFile.Name()) }()
 
 		// Write content
 		if _, err := tmpFile.WriteString(content); err != nil {
 			return components.ExternalEditorResultMsg{Error: err}
 		}
-		tmpFile.Close()
+		_ = tmpFile.Close()
 
 		// Open editor
 		cmd := exec.Command(editor, tmpFile.Name())

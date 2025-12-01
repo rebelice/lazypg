@@ -75,9 +75,6 @@ type FavoritesDialog struct {
 	tagsInput        string
 	currentField     int // 0=name, 1=description, 2=query, 3=tags
 
-	// Search
-	searchQuery string
-
 	// Validation and errors
 	validationError string
 
@@ -341,7 +338,8 @@ func (fd *FavoritesDialog) handleEditMode(msg tea.KeyMsg) (*FavoritesDialog, tea
 			}
 
 			// Send appropriate message based on mode
-			if fd.mode == FavoritesModeAdd {
+			switch fd.mode {
+			case FavoritesModeAdd:
 				cmd := func() tea.Msg {
 					return AddFavoriteMsg{
 						Name:        strings.TrimSpace(fd.nameInput),
@@ -353,7 +351,7 @@ func (fd *FavoritesDialog) handleEditMode(msg tea.KeyMsg) (*FavoritesDialog, tea
 				fd.mode = FavoritesModeList
 				fd.clearInputs()
 				return fd, cmd
-			} else if fd.mode == FavoritesModeEdit {
+			case FavoritesModeEdit:
 				fav := fd.favorites[fd.selected]
 				cmd := func() tea.Msg {
 					return EditFavoriteMsg{
@@ -367,8 +365,9 @@ func (fd *FavoritesDialog) handleEditMode(msg tea.KeyMsg) (*FavoritesDialog, tea
 				fd.mode = FavoritesModeList
 				fd.clearInputs()
 				return fd, cmd
+			default:
+				fd.mode = FavoritesModeList
 			}
-			fd.mode = FavoritesModeList
 		} else {
 			fd.currentField++
 		}
@@ -429,15 +428,15 @@ func (fd *FavoritesDialog) validateInputs() error {
 	query := strings.TrimSpace(fd.queryInput)
 
 	if name == "" {
-		return fmt.Errorf("Name is required")
+		return fmt.Errorf("name is required")
 	}
 
 	if query == "" {
-		return fmt.Errorf("Query is required")
+		return fmt.Errorf("query is required")
 	}
 
 	if len(name) > 100 {
-		return fmt.Errorf("Name is too long (max 100 characters)")
+		return fmt.Errorf("name is too long (max 100 characters)")
 	}
 
 	return nil

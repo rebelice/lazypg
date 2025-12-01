@@ -595,13 +595,6 @@ func (tv *TableView) renderStatus() string {
 	return tv.cachedStyles.status.Render(showing)
 }
 
-func (tv *TableView) pad(s string, width int) string {
-	if len(s) > width {
-		return s[:width-3] + "..."
-	}
-	return s + strings.Repeat(" ", width-len(s))
-}
-
 // MoveSelection moves the selection up or down
 func (tv *TableView) MoveSelection(delta int) {
 	tv.SelectedRow += delta

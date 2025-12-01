@@ -297,7 +297,7 @@ func (p *PreviewPane) View() string {
 		innerHeight = 3
 	}
 
-	containerStyle := p.style.Copy().
+	containerStyle := p.style.
 		Height(innerHeight)
 
 	return containerStyle.Render(content)

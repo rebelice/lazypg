@@ -455,7 +455,7 @@ func (sv *StructureView) CopyCurrentName() string {
 	}
 
 	if name != "" {
-		clipboard.WriteAll(name)
+		_ = clipboard.WriteAll(name)
 		return fmt.Sprintf("✓ Copied: %s", name)
 	}
 	return ""
@@ -483,7 +483,7 @@ func (sv *StructureView) CopyCurrentDefinition() string {
 	}
 
 	if definition != "" {
-		clipboard.WriteAll(definition)
+		_ = clipboard.WriteAll(definition)
 		preview := definition
 		if len(preview) > 50 {
 			preview = preview[:50] + "..."

@@ -884,9 +884,10 @@ func (jv *JSONBViewer) renderMainPanel(width int) string {
 	} else if jv.quickJumpMode {
 		// Show mark/jump mode
 		var modeInfo string
-		if jv.quickJumpBuffer == "m" {
+		switch jv.quickJumpBuffer {
+		case "m":
 			modeInfo = "Mark mode: Press a-z to set mark"
-		} else if jv.quickJumpBuffer == "'" {
+		case "'":
 			modeInfo = "Jump mode: Press a-z to jump to mark"
 		}
 		sections = append(sections, jv.cachedStyles.instructions.Render(modeInfo))
@@ -1317,12 +1318,13 @@ func (jv *JSONBViewer) handleQuickJump(char string) {
 		return
 	}
 
-	if jv.quickJumpBuffer == "m" {
+	switch jv.quickJumpBuffer {
+	case "m":
 		// Set mark
 		if jv.selectedIndex < len(jv.visibleNodes) {
 			jv.marks[r] = jv.visibleNodes[jv.selectedIndex]
 		}
-	} else if jv.quickJumpBuffer == "'" {
+	case "'":
 		// Jump to mark
 		if targetNode, ok := jv.marks[r]; ok {
 			// Find the node in visible nodes

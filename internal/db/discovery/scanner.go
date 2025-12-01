@@ -87,7 +87,7 @@ func (s *Scanner) scanPort(ctx context.Context, host string, port int) models.Di
 		return instance
 	}
 
-	conn.Close()
+	_ = conn.Close()
 	instance.Available = true
 
 	return instance
