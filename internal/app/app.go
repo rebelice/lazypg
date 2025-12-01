@@ -1347,7 +1347,7 @@ func (a *App) renderNormalView() string {
 	var bottomBarLeft string
 	if a.sqlEditorFocused {
 		// SQL editor mode
-		bottomBarLeft = keyStyle.Render("Alt+Enter") + dimStyle.Render(" execute") +
+		bottomBarLeft = keyStyle.Render("Ctrl+S") + dimStyle.Render(" execute") +
 			separatorStyle.Render(" │ ") +
 			keyStyle.Render("Ctrl+O") + dimStyle.Render(" editor") +
 			separatorStyle.Render(" │ ") +
