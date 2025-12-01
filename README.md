@@ -111,7 +111,7 @@ make build
 
 ### Requirements
 
-- Go 1.21+ (for building from source)
+- Go 1.23+ (for building from source)
 - PostgreSQL 12+ (for connecting)
 
 ## Quick Start
