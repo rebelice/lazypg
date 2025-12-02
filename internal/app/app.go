@@ -1384,6 +1384,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.state.Width = msg.Width
 		a.state.Height = msg.Height
 		a.updatePanelDimensions()
+
+	default:
+		// Forward other messages (like textinput's internal pasteMsg) to active input components
+		// This enables clipboard paste functionality (Ctrl+V) in text inputs
+		// Only components that use charmbracelet/bubbles/textinput need these messages
+		var cmd tea.Cmd
+		if a.showConnectionDialog {
+			a.connectionDialog, cmd = a.connectionDialog.Update(msg)
+			return a, cmd
+		}
+		if a.showSearch {
+			a.searchInput, cmd = a.searchInput.Update(msg)
+			return a, cmd
+		}
 	}
 	return a, nil
 }
