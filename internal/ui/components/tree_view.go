@@ -32,7 +32,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone"
 	"github.com/rebelice/lazypg/internal/models"
 	"github.com/rebelice/lazypg/internal/ui/theme"
@@ -260,15 +259,10 @@ func (tv *TreeView) renderNode(node *models.TreeNode, selected bool) string {
 	// Combine parts
 	content := fmt.Sprintf("%s%s %s", indent, icon, label)
 
-	// Calculate available width (account for border/padding)
-	maxWidth := tv.Width - 2
-
-	// Use ansi.StringWidth to correctly calculate width including ANSI escape codes
-	contentWidth := ansi.StringWidth(content)
-
-	// Truncate if too long using ansi.Truncate which handles ANSI codes properly
-	if contentWidth > maxWidth {
-		content = ansi.Truncate(content, maxWidth-1, "…")
+	// Truncate if too long
+	maxWidth := tv.Width - 2 // Account for padding
+	if len(content) > maxWidth {
+		content = content[:maxWidth-1] + "…"
 	}
 
 	// Apply styling
@@ -278,11 +272,11 @@ func (tv *TreeView) renderNode(node *models.TreeNode, selected bool) string {
 			Background(tv.Theme.Selection).
 			Foreground(tv.Theme.Foreground).
 			Bold(true).
-			MaxWidth(maxWidth)
+			Width(maxWidth)
 	} else {
 		style = lipgloss.NewStyle().
 			Foreground(tv.Theme.Foreground).
-			MaxWidth(maxWidth)
+			Width(maxWidth)
 	}
 
 	return style.Render(content)
