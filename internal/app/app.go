@@ -2907,21 +2907,58 @@ func (a *App) loadTree() tea.Msg {
 	// Find the database node
 	dbNode := root.FindByID(fmt.Sprintf("db:%s", currentDB))
 	if dbNode != nil {
+		// Load extensions at database level (before schemas)
+		extensions, _ := metadata.ListExtensions(ctx, conn.Pool)
+		if len(extensions) > 0 {
+			extGroup := models.NewTreeNode(
+				fmt.Sprintf("extensions:%s", currentDB),
+				models.TreeNodeTypeExtensionGroup,
+				fmt.Sprintf("Extensions (%d)", len(extensions)),
+			)
+			extGroup.Selectable = false
+
+			for _, ext := range extensions {
+				extNode := models.NewTreeNode(
+					fmt.Sprintf("extension:%s.%s", currentDB, ext.Name),
+					models.TreeNodeTypeExtension,
+					fmt.Sprintf("%s v%s", ext.Name, ext.Version),
+				)
+				extNode.Selectable = true
+				extNode.Metadata = ext
+				extNode.Loaded = true
+				extGroup.AddChild(extNode)
+			}
+			extGroup.Loaded = true
+			dbNode.AddChild(extGroup)
+		}
+
 		// Add schema nodes as children
 		for _, schema := range schemas {
-			// Load tables and views for this schema
+			// Load all objects for this schema
 			tables, _ := metadata.ListTables(ctx, conn.Pool, schema.Name)
 			views, _ := metadata.ListViews(ctx, conn.Pool, schema.Name)
+			matViews, _ := metadata.ListMaterializedViews(ctx, conn.Pool, schema.Name)
+			functions, _ := metadata.ListFunctions(ctx, conn.Pool, schema.Name)
+			procedures, _ := metadata.ListProcedures(ctx, conn.Pool, schema.Name)
+			triggerFuncs, _ := metadata.ListTriggerFunctions(ctx, conn.Pool, schema.Name)
+			sequences, _ := metadata.ListSequences(ctx, conn.Pool, schema.Name)
+			compositeTypes, _ := metadata.ListCompositeTypes(ctx, conn.Pool, schema.Name)
+			enumTypes, _ := metadata.ListEnumTypes(ctx, conn.Pool, schema.Name)
+			domainTypes, _ := metadata.ListDomainTypes(ctx, conn.Pool, schema.Name)
+			rangeTypes, _ := metadata.ListRangeTypes(ctx, conn.Pool, schema.Name)
 
-			// Create schema label with counts
-			schemaLabel := schema.Name
-			if len(tables) > 0 || len(views) > 0 {
-				if len(views) > 0 {
-					schemaLabel = fmt.Sprintf("%s (%d tables, %d views)", schema.Name, len(tables), len(views))
-				} else {
-					schemaLabel = fmt.Sprintf("%s (%d)", schema.Name, len(tables))
-				}
+			// Count total objects
+			totalObjects := len(tables) + len(views) + len(matViews) + len(functions) +
+				len(procedures) + len(triggerFuncs) + len(sequences) +
+				len(compositeTypes) + len(enumTypes) + len(domainTypes) + len(rangeTypes)
+
+			// Skip empty schemas
+			if totalObjects == 0 {
+				continue
 			}
+
+			// Create schema label
+			schemaLabel := schema.Name
 
 			schemaNode := models.NewTreeNode(
 				fmt.Sprintf("schema:%s.%s", currentDB, schema.Name),
@@ -2930,7 +2967,7 @@ func (a *App) loadTree() tea.Msg {
 			)
 			schemaNode.Selectable = true
 
-			// Add Tables group if there are tables
+			// Add Tables group
 			if len(tables) > 0 {
 				tablesGroup := models.NewTreeNode(
 					fmt.Sprintf("tables:%s.%s", currentDB, schema.Name),
@@ -2946,14 +2983,65 @@ func (a *App) loadTree() tea.Msg {
 						table.Name,
 					)
 					tableNode.Selectable = true
-					tableNode.Loaded = true // Mark as loaded so click triggers select, not expand
+
+					// Load indexes and triggers for this table
+					indexes, _ := metadata.ListTableIndexes(ctx, conn.Pool, schema.Name, table.Name)
+					triggers, _ := metadata.ListTableTriggers(ctx, conn.Pool, schema.Name, table.Name)
+
+					// Add Indexes group under table
+					if len(indexes) > 0 {
+						indexGroup := models.NewTreeNode(
+							fmt.Sprintf("indexes:%s.%s.%s", currentDB, schema.Name, table.Name),
+							models.TreeNodeTypeIndexGroup,
+							fmt.Sprintf("Indexes (%d)", len(indexes)),
+						)
+						indexGroup.Selectable = false
+						for _, idx := range indexes {
+							idxNode := models.NewTreeNode(
+								fmt.Sprintf("index:%s.%s.%s.%s", currentDB, schema.Name, table.Name, idx.Name),
+								models.TreeNodeTypeIndex,
+								idx.Name,
+							)
+							idxNode.Selectable = true
+							idxNode.Metadata = idx
+							idxNode.Loaded = true
+							indexGroup.AddChild(idxNode)
+						}
+						indexGroup.Loaded = true
+						tableNode.AddChild(indexGroup)
+					}
+
+					// Add Triggers group under table
+					if len(triggers) > 0 {
+						triggerGroup := models.NewTreeNode(
+							fmt.Sprintf("triggers:%s.%s.%s", currentDB, schema.Name, table.Name),
+							models.TreeNodeTypeTriggerGroup,
+							fmt.Sprintf("Triggers (%d)", len(triggers)),
+						)
+						triggerGroup.Selectable = false
+						for _, trg := range triggers {
+							trgNode := models.NewTreeNode(
+								fmt.Sprintf("trigger:%s.%s.%s.%s", currentDB, schema.Name, table.Name, trg.Name),
+								models.TreeNodeTypeTrigger,
+								trg.Name,
+							)
+							trgNode.Selectable = true
+							trgNode.Metadata = trg
+							trgNode.Loaded = true
+							triggerGroup.AddChild(trgNode)
+						}
+						triggerGroup.Loaded = true
+						tableNode.AddChild(triggerGroup)
+					}
+
+					tableNode.Loaded = len(indexes) == 0 && len(triggers) == 0
 					tablesGroup.AddChild(tableNode)
 				}
 				tablesGroup.Loaded = true
 				schemaNode.AddChild(tablesGroup)
 			}
 
-			// Add Views group if there are views
+			// Add Views group
 			if len(views) > 0 {
 				viewsGroup := models.NewTreeNode(
 					fmt.Sprintf("views:%s.%s", currentDB, schema.Name),
@@ -2969,11 +3057,243 @@ func (a *App) loadTree() tea.Msg {
 						view.Name,
 					)
 					viewNode.Selectable = true
-					viewNode.Loaded = true // Mark as loaded so click triggers select, not expand
+					viewNode.Loaded = true
 					viewsGroup.AddChild(viewNode)
 				}
 				viewsGroup.Loaded = true
 				schemaNode.AddChild(viewsGroup)
+			}
+
+			// Add Materialized Views group
+			if len(matViews) > 0 {
+				matViewsGroup := models.NewTreeNode(
+					fmt.Sprintf("matviews:%s.%s", currentDB, schema.Name),
+					models.TreeNodeTypeMaterializedViewGroup,
+					fmt.Sprintf("Materialized Views (%d)", len(matViews)),
+				)
+				matViewsGroup.Selectable = false
+
+				for _, mv := range matViews {
+					mvNode := models.NewTreeNode(
+						fmt.Sprintf("matview:%s.%s.%s", currentDB, schema.Name, mv.Name),
+						models.TreeNodeTypeMaterializedView,
+						mv.Name,
+					)
+					mvNode.Selectable = true
+					mvNode.Loaded = true
+					matViewsGroup.AddChild(mvNode)
+				}
+				matViewsGroup.Loaded = true
+				schemaNode.AddChild(matViewsGroup)
+			}
+
+			// Add Functions group
+			if len(functions) > 0 {
+				funcsGroup := models.NewTreeNode(
+					fmt.Sprintf("functions:%s.%s", currentDB, schema.Name),
+					models.TreeNodeTypeFunctionGroup,
+					fmt.Sprintf("Functions (%d)", len(functions)),
+				)
+				funcsGroup.Selectable = false
+
+				for _, fn := range functions {
+					label := fn.Name
+					if fn.Arguments != "" {
+						label = fmt.Sprintf("%s(%s)", fn.Name, fn.Arguments)
+					}
+					fnNode := models.NewTreeNode(
+						fmt.Sprintf("function:%s.%s.%s", currentDB, schema.Name, fn.Name),
+						models.TreeNodeTypeFunction,
+						label,
+					)
+					fnNode.Selectable = true
+					fnNode.Metadata = fn
+					fnNode.Loaded = true
+					funcsGroup.AddChild(fnNode)
+				}
+				funcsGroup.Loaded = true
+				schemaNode.AddChild(funcsGroup)
+			}
+
+			// Add Procedures group
+			if len(procedures) > 0 {
+				procsGroup := models.NewTreeNode(
+					fmt.Sprintf("procedures:%s.%s", currentDB, schema.Name),
+					models.TreeNodeTypeProcedureGroup,
+					fmt.Sprintf("Procedures (%d)", len(procedures)),
+				)
+				procsGroup.Selectable = false
+
+				for _, proc := range procedures {
+					label := proc.Name
+					if proc.Arguments != "" {
+						label = fmt.Sprintf("%s(%s)", proc.Name, proc.Arguments)
+					}
+					procNode := models.NewTreeNode(
+						fmt.Sprintf("procedure:%s.%s.%s", currentDB, schema.Name, proc.Name),
+						models.TreeNodeTypeProcedure,
+						label,
+					)
+					procNode.Selectable = true
+					procNode.Metadata = proc
+					procNode.Loaded = true
+					procsGroup.AddChild(procNode)
+				}
+				procsGroup.Loaded = true
+				schemaNode.AddChild(procsGroup)
+			}
+
+			// Add Trigger Functions group
+			if len(triggerFuncs) > 0 {
+				trigFuncsGroup := models.NewTreeNode(
+					fmt.Sprintf("triggerfuncs:%s.%s", currentDB, schema.Name),
+					models.TreeNodeTypeTriggerFunctionGroup,
+					fmt.Sprintf("Trigger Functions (%d)", len(triggerFuncs)),
+				)
+				trigFuncsGroup.Selectable = false
+
+				for _, tf := range triggerFuncs {
+					tfNode := models.NewTreeNode(
+						fmt.Sprintf("triggerfunc:%s.%s.%s", currentDB, schema.Name, tf.Name),
+						models.TreeNodeTypeTriggerFunction,
+						tf.Name,
+					)
+					tfNode.Selectable = true
+					tfNode.Metadata = tf
+					tfNode.Loaded = true
+					trigFuncsGroup.AddChild(tfNode)
+				}
+				trigFuncsGroup.Loaded = true
+				schemaNode.AddChild(trigFuncsGroup)
+			}
+
+			// Add Sequences group
+			if len(sequences) > 0 {
+				seqsGroup := models.NewTreeNode(
+					fmt.Sprintf("sequences:%s.%s", currentDB, schema.Name),
+					models.TreeNodeTypeSequenceGroup,
+					fmt.Sprintf("Sequences (%d)", len(sequences)),
+				)
+				seqsGroup.Selectable = false
+
+				for _, seq := range sequences {
+					seqNode := models.NewTreeNode(
+						fmt.Sprintf("sequence:%s.%s.%s", currentDB, schema.Name, seq.Name),
+						models.TreeNodeTypeSequence,
+						seq.Name,
+					)
+					seqNode.Selectable = true
+					seqNode.Metadata = seq
+					seqNode.Loaded = true
+					seqsGroup.AddChild(seqNode)
+				}
+				seqsGroup.Loaded = true
+				schemaNode.AddChild(seqsGroup)
+			}
+
+			// Add Types group (with subgroups)
+			hasTypes := len(compositeTypes) > 0 || len(enumTypes) > 0 || len(domainTypes) > 0 || len(rangeTypes) > 0
+			if hasTypes {
+				typesGroup := models.NewTreeNode(
+					fmt.Sprintf("types:%s.%s", currentDB, schema.Name),
+					models.TreeNodeTypeTypeGroup,
+					fmt.Sprintf("Types (%d)", len(compositeTypes)+len(enumTypes)+len(domainTypes)+len(rangeTypes)),
+				)
+				typesGroup.Selectable = false
+
+				// Composite Types
+				if len(compositeTypes) > 0 {
+					compGroup := models.NewTreeNode(
+						fmt.Sprintf("compositetypes:%s.%s", currentDB, schema.Name),
+						models.TreeNodeTypeCompositeTypeGroup,
+						fmt.Sprintf("Composite (%d)", len(compositeTypes)),
+					)
+					compGroup.Selectable = false
+					for _, ct := range compositeTypes {
+						ctNode := models.NewTreeNode(
+							fmt.Sprintf("compositetype:%s.%s.%s", currentDB, schema.Name, ct.Name),
+							models.TreeNodeTypeCompositeType,
+							ct.Name,
+						)
+						ctNode.Selectable = true
+						ctNode.Loaded = true
+						compGroup.AddChild(ctNode)
+					}
+					compGroup.Loaded = true
+					typesGroup.AddChild(compGroup)
+				}
+
+				// Enum Types
+				if len(enumTypes) > 0 {
+					enumGroup := models.NewTreeNode(
+						fmt.Sprintf("enumtypes:%s.%s", currentDB, schema.Name),
+						models.TreeNodeTypeEnumTypeGroup,
+						fmt.Sprintf("Enum (%d)", len(enumTypes)),
+					)
+					enumGroup.Selectable = false
+					for _, et := range enumTypes {
+						etNode := models.NewTreeNode(
+							fmt.Sprintf("enumtype:%s.%s.%s", currentDB, schema.Name, et.Name),
+							models.TreeNodeTypeEnumType,
+							et.Name,
+						)
+						etNode.Selectable = true
+						etNode.Metadata = et
+						etNode.Loaded = true
+						enumGroup.AddChild(etNode)
+					}
+					enumGroup.Loaded = true
+					typesGroup.AddChild(enumGroup)
+				}
+
+				// Domain Types
+				if len(domainTypes) > 0 {
+					domGroup := models.NewTreeNode(
+						fmt.Sprintf("domaintypes:%s.%s", currentDB, schema.Name),
+						models.TreeNodeTypeDomainTypeGroup,
+						fmt.Sprintf("Domain (%d)", len(domainTypes)),
+					)
+					domGroup.Selectable = false
+					for _, dt := range domainTypes {
+						dtNode := models.NewTreeNode(
+							fmt.Sprintf("domaintype:%s.%s.%s", currentDB, schema.Name, dt.Name),
+							models.TreeNodeTypeDomainType,
+							fmt.Sprintf("%s → %s", dt.Name, dt.BaseType),
+						)
+						dtNode.Selectable = true
+						dtNode.Metadata = dt
+						dtNode.Loaded = true
+						domGroup.AddChild(dtNode)
+					}
+					domGroup.Loaded = true
+					typesGroup.AddChild(domGroup)
+				}
+
+				// Range Types
+				if len(rangeTypes) > 0 {
+					rangeGroup := models.NewTreeNode(
+						fmt.Sprintf("rangetypes:%s.%s", currentDB, schema.Name),
+						models.TreeNodeTypeRangeTypeGroup,
+						fmt.Sprintf("Range (%d)", len(rangeTypes)),
+					)
+					rangeGroup.Selectable = false
+					for _, rt := range rangeTypes {
+						rtNode := models.NewTreeNode(
+							fmt.Sprintf("rangetype:%s.%s.%s", currentDB, schema.Name, rt.Name),
+							models.TreeNodeTypeRangeType,
+							fmt.Sprintf("%s [%s]", rt.Name, rt.Subtype),
+						)
+						rtNode.Selectable = true
+						rtNode.Metadata = rt
+						rtNode.Loaded = true
+						rangeGroup.AddChild(rtNode)
+					}
+					rangeGroup.Loaded = true
+					typesGroup.AddChild(rangeGroup)
+				}
+
+				typesGroup.Loaded = true
+				schemaNode.AddChild(typesGroup)
 			}
 
 			schemaNode.Loaded = true
