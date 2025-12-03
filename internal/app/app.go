@@ -1318,35 +1318,71 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case components.TreeNodeSelectedMsg:
-		// Handle table or view selection
-		if msg.Node != nil && (msg.Node.Type == models.TreeNodeTypeTable || msg.Node.Type == models.TreeNodeTypeView) {
-			// Get schema name by traversing up the tree
-			// Structure: Schema -> TableGroup/ViewGroup -> Table/View
-			var schemaName string
-			groupNode := msg.Node.Parent
-			if groupNode != nil && (groupNode.Type == models.TreeNodeTypeTableGroup || groupNode.Type == models.TreeNodeTypeViewGroup) {
-				schemaNode := groupNode.Parent
-				if schemaNode != nil && schemaNode.Type == models.TreeNodeTypeSchema {
-					// Extract schema name from label (may contain count info like "public (35 tables, 5 views)")
-					schemaName = strings.Split(schemaNode.Label, " ")[0]
-				}
-			}
-
-			if schemaName != "" {
-				table := msg.Node.Label
-				a.currentTable = schemaName + "." + table
-
-				return a, func() tea.Msg {
-					return LoadTableDataMsg{
-						Schema: schemaName,
-						Table:  table,
-						Offset: 0,
-						Limit:  100,
-					}
-				}
-			}
+		// Handle selection based on node type
+		if msg.Node == nil {
+			return a, nil
 		}
-		return a, nil
+
+		switch msg.Node.Type {
+		case models.TreeNodeTypeTable, models.TreeNodeTypeView, models.TreeNodeTypeMaterializedView:
+			// Get schema name by traversing up the tree
+			var schemaName string
+			current := msg.Node.Parent
+			for current != nil {
+				if current.Type == models.TreeNodeTypeSchema {
+					schemaName = strings.Split(current.Label, " ")[0]
+					break
+				}
+				current = current.Parent
+			}
+
+			if schemaName == "" {
+				return a, nil
+			}
+
+			// Clear any active filter when switching tables
+			a.activeFilter = nil
+
+			// Store selected node
+			a.state.TreeSelected = msg.Node
+
+			// Load table/view data
+			return a, a.loadTableData(LoadTableDataMsg{
+				Schema: schemaName,
+				Table:  msg.Node.Label,
+				Offset: 0,
+				Limit:  100,
+			})
+
+		case models.TreeNodeTypeFunction, models.TreeNodeTypeProcedure, models.TreeNodeTypeTriggerFunction:
+			// TODO: Display function/procedure source code
+			a.state.TreeSelected = msg.Node
+			return a, nil
+
+		case models.TreeNodeTypeSequence:
+			// TODO: Display sequence properties
+			a.state.TreeSelected = msg.Node
+			return a, nil
+
+		case models.TreeNodeTypeIndex, models.TreeNodeTypeTrigger:
+			// TODO: Display DDL definition
+			a.state.TreeSelected = msg.Node
+			return a, nil
+
+		case models.TreeNodeTypeExtension:
+			// TODO: Display extension info
+			a.state.TreeSelected = msg.Node
+			return a, nil
+
+		case models.TreeNodeTypeCompositeType, models.TreeNodeTypeEnumType,
+			models.TreeNodeTypeDomainType, models.TreeNodeTypeRangeType:
+			// TODO: Display type definition
+			a.state.TreeSelected = msg.Node
+			return a, nil
+
+		default:
+			return a, nil
+		}
 
 	case LoadTableDataMsg:
 		return a, a.loadTableData(msg)
