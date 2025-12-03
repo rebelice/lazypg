@@ -1343,8 +1343,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Clear any active filter when switching tables
 			a.activeFilter = nil
 
-			// Store selected node
+			// Store selected node and current table
 			a.state.TreeSelected = msg.Node
+			a.currentTable = schemaName + "." + msg.Node.Label
 
 			// Load table/view data
 			return a, a.loadTableData(LoadTableDataMsg{
