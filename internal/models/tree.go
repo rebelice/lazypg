@@ -17,6 +17,37 @@ const (
 	TreeNodeTypeTable      TreeNodeType = "table"
 	TreeNodeTypeView       TreeNodeType = "view"
 	TreeNodeTypeColumn     TreeNodeType = "column"
+
+	// New group types
+	TreeNodeTypeMaterializedViewGroup TreeNodeType = "materialized_view_group"
+	TreeNodeTypeFunctionGroup         TreeNodeType = "function_group"
+	TreeNodeTypeProcedureGroup        TreeNodeType = "procedure_group"
+	TreeNodeTypeTriggerFunctionGroup  TreeNodeType = "trigger_function_group"
+	TreeNodeTypeSequenceGroup         TreeNodeType = "sequence_group"
+	TreeNodeTypeTypeGroup             TreeNodeType = "type_group"
+	TreeNodeTypeExtensionGroup        TreeNodeType = "extension_group"
+	TreeNodeTypeIndexGroup            TreeNodeType = "index_group"
+	TreeNodeTypeTriggerGroup          TreeNodeType = "trigger_group"
+
+	// Type subcategory groups
+	TreeNodeTypeCompositeTypeGroup TreeNodeType = "composite_type_group"
+	TreeNodeTypeEnumTypeGroup      TreeNodeType = "enum_type_group"
+	TreeNodeTypeDomainTypeGroup    TreeNodeType = "domain_type_group"
+	TreeNodeTypeRangeTypeGroup     TreeNodeType = "range_type_group"
+
+	// New leaf node types
+	TreeNodeTypeMaterializedView TreeNodeType = "materialized_view"
+	TreeNodeTypeFunction         TreeNodeType = "function"
+	TreeNodeTypeProcedure        TreeNodeType = "procedure"
+	TreeNodeTypeTriggerFunction  TreeNodeType = "trigger_function"
+	TreeNodeTypeSequence         TreeNodeType = "sequence"
+	TreeNodeTypeIndex            TreeNodeType = "index"
+	TreeNodeTypeTrigger          TreeNodeType = "trigger"
+	TreeNodeTypeExtension        TreeNodeType = "extension"
+	TreeNodeTypeCompositeType    TreeNodeType = "composite_type"
+	TreeNodeTypeEnumType         TreeNodeType = "enum_type"
+	TreeNodeTypeDomainType       TreeNodeType = "domain_type"
+	TreeNodeTypeRangeType        TreeNodeType = "range_type"
 )
 
 // TreeNode represents a node in the navigation tree
@@ -54,15 +85,23 @@ func (n *TreeNode) AddChild(child *TreeNode) {
 // Toggle toggles the expanded state of the node
 // A node can be toggled if it has children OR if it hasn't been loaded yet (lazy loading)
 func (n *TreeNode) Toggle() {
-	// Can toggle if:
-	// 1. It has children, OR
-	// 2. It hasn't been loaded yet (might have children when loaded)
-	// Exception: Root and Column nodes - columns are leaf nodes with no children
-	if n.Type == TreeNodeTypeColumn {
-		return // Columns can't be expanded
+	// Leaf nodes that can't be expanded
+	switch n.Type {
+	case TreeNodeTypeColumn,
+		TreeNodeTypeFunction,
+		TreeNodeTypeProcedure,
+		TreeNodeTypeTriggerFunction,
+		TreeNodeTypeSequence,
+		TreeNodeTypeIndex,
+		TreeNodeTypeTrigger,
+		TreeNodeTypeExtension,
+		TreeNodeTypeCompositeType,
+		TreeNodeTypeEnumType,
+		TreeNodeTypeDomainType,
+		TreeNodeTypeRangeType:
+		return
 	}
 
-	// For other nodes, toggle if they have children or haven't been loaded
 	if len(n.Children) > 0 || !n.Loaded {
 		n.Expanded = !n.Expanded
 	}
