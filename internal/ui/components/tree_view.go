@@ -313,21 +313,57 @@ func (tv *TreeView) getNodeIcon(node *models.TreeNode) string {
 			iconColor = tv.Theme.SchemaCollapsed
 		}
 
-	case models.TreeNodeTypeTableGroup:
+	case models.TreeNodeTypeTableGroup,
+		models.TreeNodeTypeViewGroup,
+		models.TreeNodeTypeMaterializedViewGroup,
+		models.TreeNodeTypeFunctionGroup,
+		models.TreeNodeTypeProcedureGroup,
+		models.TreeNodeTypeTriggerFunctionGroup,
+		models.TreeNodeTypeSequenceGroup,
+		models.TreeNodeTypeTypeGroup,
+		models.TreeNodeTypeExtensionGroup,
+		models.TreeNodeTypeIndexGroup,
+		models.TreeNodeTypeTriggerGroup,
+		models.TreeNodeTypeCompositeTypeGroup,
+		models.TreeNodeTypeEnumTypeGroup,
+		models.TreeNodeTypeDomainTypeGroup,
+		models.TreeNodeTypeRangeTypeGroup:
 		if node.Expanded {
 			icon = "▾"
 		} else {
 			icon = "▸"
 		}
-		iconColor = tv.Theme.TableIcon
-
-	case models.TreeNodeTypeViewGroup:
-		if node.Expanded {
-			icon = "▾"
-		} else {
-			icon = "▸"
+		// Color based on group type
+		switch node.Type {
+		case models.TreeNodeTypeTableGroup:
+			iconColor = tv.Theme.TableIcon
+		case models.TreeNodeTypeViewGroup:
+			iconColor = tv.Theme.ViewIcon
+		case models.TreeNodeTypeMaterializedViewGroup:
+			iconColor = tv.Theme.MaterializedViewIcon
+		case models.TreeNodeTypeFunctionGroup:
+			iconColor = tv.Theme.FunctionIcon
+		case models.TreeNodeTypeProcedureGroup:
+			iconColor = tv.Theme.ProcedureIcon
+		case models.TreeNodeTypeTriggerFunctionGroup:
+			iconColor = tv.Theme.TriggerFunctionIcon
+		case models.TreeNodeTypeSequenceGroup:
+			iconColor = tv.Theme.SequenceIcon
+		case models.TreeNodeTypeTypeGroup,
+			models.TreeNodeTypeCompositeTypeGroup,
+			models.TreeNodeTypeEnumTypeGroup,
+			models.TreeNodeTypeDomainTypeGroup,
+			models.TreeNodeTypeRangeTypeGroup:
+			iconColor = tv.Theme.TypeIcon
+		case models.TreeNodeTypeExtensionGroup:
+			iconColor = tv.Theme.ExtensionIcon
+		case models.TreeNodeTypeIndexGroup:
+			iconColor = tv.Theme.IndexIcon
+		case models.TreeNodeTypeTriggerGroup:
+			iconColor = tv.Theme.TriggerIcon
+		default:
+			iconColor = tv.Theme.Foreground
 		}
-		iconColor = tv.Theme.Metadata
 
 	case models.TreeNodeTypeTable:
 		icon = "▦"
@@ -335,7 +371,55 @@ func (tv *TreeView) getNodeIcon(node *models.TreeNode) string {
 
 	case models.TreeNodeTypeView:
 		icon = "◎"
-		iconColor = tv.Theme.Metadata
+		iconColor = tv.Theme.ViewIcon
+
+	case models.TreeNodeTypeMaterializedView:
+		icon = "◉"
+		iconColor = tv.Theme.MaterializedViewIcon
+
+	case models.TreeNodeTypeFunction:
+		icon = "ƒ"
+		iconColor = tv.Theme.FunctionIcon
+
+	case models.TreeNodeTypeProcedure:
+		icon = "⚙"
+		iconColor = tv.Theme.ProcedureIcon
+
+	case models.TreeNodeTypeTriggerFunction:
+		icon = "⚡"
+		iconColor = tv.Theme.TriggerFunctionIcon
+
+	case models.TreeNodeTypeSequence:
+		icon = "#"
+		iconColor = tv.Theme.SequenceIcon
+
+	case models.TreeNodeTypeIndex:
+		icon = "⊕"
+		iconColor = tv.Theme.IndexIcon
+
+	case models.TreeNodeTypeTrigger:
+		icon = "↯"
+		iconColor = tv.Theme.TriggerIcon
+
+	case models.TreeNodeTypeExtension:
+		icon = "◈"
+		iconColor = tv.Theme.ExtensionIcon
+
+	case models.TreeNodeTypeCompositeType:
+		icon = "◫"
+		iconColor = tv.Theme.TypeIcon
+
+	case models.TreeNodeTypeEnumType:
+		icon = "◧"
+		iconColor = tv.Theme.TypeIcon
+
+	case models.TreeNodeTypeDomainType:
+		icon = "◨"
+		iconColor = tv.Theme.TypeIcon
+
+	case models.TreeNodeTypeRangeType:
+		icon = "◩"
+		iconColor = tv.Theme.TypeIcon
 
 	case models.TreeNodeTypeColumn:
 		icon = "•"
