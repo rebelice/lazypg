@@ -436,6 +436,312 @@ func ListRangeTypes(ctx context.Context, pool *connection.Pool, schema string) (
 	return types, nil
 }
 
+// FunctionSource represents the source code of a function/procedure
+type FunctionSource struct {
+	Name       string
+	Schema     string
+	Arguments  string
+	ReturnType string
+	Language   string
+	Source     string
+	Definition string // Full CREATE FUNCTION statement
+}
+
+// SequenceDetails represents detailed sequence information including current value
+type SequenceDetails struct {
+	Schema       string
+	Name         string
+	CurrentValue int64
+	StartValue   int64
+	MinValue     int64
+	MaxValue     int64
+	Increment    int64
+	Cycle        bool
+	Owner        string
+}
+
+// ExtensionDetails represents detailed extension information
+type ExtensionDetails struct {
+	Name        string
+	Version     string
+	Schema      string
+	Description string
+}
+
+// CompositeTypeDetails represents detailed composite type information
+type CompositeTypeDetails struct {
+	Schema     string
+	Name       string
+	Attributes []TypeAttribute
+}
+
+// TypeAttribute represents an attribute of a composite type
+type TypeAttribute struct {
+	Name     string
+	Type     string
+	Position int
+}
+
+// DomainTypeDetails represents detailed domain type information
+type DomainTypeDetails struct {
+	Schema      string
+	Name        string
+	BaseType    string
+	Default     string
+	NotNull     bool
+	Constraints []string
+}
+
+// GetFunctionSource returns the source code of a function, procedure, or trigger function
+func GetFunctionSource(ctx context.Context, pool *connection.Pool, schema, name, args string) (*FunctionSource, error) {
+	query := `
+		SELECT
+			p.proname,
+			n.nspname,
+			pg_get_function_identity_arguments(p.oid) as args,
+			pg_get_function_result(p.oid) as return_type,
+			l.lanname as language,
+			p.prosrc as source,
+			pg_get_functiondef(p.oid) as definition
+		FROM pg_proc p
+		JOIN pg_namespace n ON p.pronamespace = n.oid
+		JOIN pg_language l ON p.prolang = l.oid
+		WHERE n.nspname = $1 AND p.proname = $2
+		  AND pg_get_function_identity_arguments(p.oid) = $3;
+	`
+
+	rows, err := pool.Query(ctx, query, schema, name, args)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("function %s.%s(%s) not found", schema, name, args)
+	}
+
+	row := rows[0]
+	return &FunctionSource{
+		Name:       toString(row["proname"]),
+		Schema:     toString(row["nspname"]),
+		Arguments:  toString(row["args"]),
+		ReturnType: toString(row["return_type"]),
+		Language:   toString(row["language"]),
+		Source:     toString(row["source"]),
+		Definition: toString(row["definition"]),
+	}, nil
+}
+
+// GetTriggerFunctionSource returns the source code of a trigger function (no args version)
+func GetTriggerFunctionSource(ctx context.Context, pool *connection.Pool, schema, name string) (*FunctionSource, error) {
+	query := `
+		SELECT
+			p.proname,
+			n.nspname,
+			'' as args,
+			'trigger' as return_type,
+			l.lanname as language,
+			p.prosrc as source,
+			pg_get_functiondef(p.oid) as definition
+		FROM pg_proc p
+		JOIN pg_namespace n ON p.pronamespace = n.oid
+		JOIN pg_language l ON p.prolang = l.oid
+		WHERE n.nspname = $1 AND p.proname = $2
+		  AND p.prorettype = 'trigger'::regtype;
+	`
+
+	rows, err := pool.Query(ctx, query, schema, name)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("trigger function %s.%s not found", schema, name)
+	}
+
+	row := rows[0]
+	return &FunctionSource{
+		Name:       toString(row["proname"]),
+		Schema:     toString(row["nspname"]),
+		Arguments:  toString(row["args"]),
+		ReturnType: toString(row["return_type"]),
+		Language:   toString(row["language"]),
+		Source:     toString(row["source"]),
+		Definition: toString(row["definition"]),
+	}, nil
+}
+
+// GetSequenceDetails returns detailed information about a sequence including current value
+func GetSequenceDetails(ctx context.Context, pool *connection.Pool, schema, name string) (*SequenceDetails, error) {
+	// First get the sequence properties
+	query := `
+		SELECT
+			schemaname,
+			sequencename,
+			start_value,
+			min_value,
+			max_value,
+			increment_by,
+			cycle,
+			sequenceowner
+		FROM pg_sequences
+		WHERE schemaname = $1 AND sequencename = $2;
+	`
+
+	rows, err := pool.Query(ctx, query, schema, name)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("sequence %s.%s not found", schema, name)
+	}
+
+	row := rows[0]
+	details := &SequenceDetails{
+		Schema:     toString(row["schemaname"]),
+		Name:       toString(row["sequencename"]),
+		StartValue: toInt64(row["start_value"]),
+		MinValue:   toInt64(row["min_value"]),
+		MaxValue:   toInt64(row["max_value"]),
+		Increment:  toInt64(row["increment_by"]),
+		Cycle:      toBool(row["cycle"]),
+		Owner:      toString(row["sequenceowner"]),
+	}
+
+	// Get current value using last_value from the sequence itself
+	// This requires querying the sequence directly
+	lastValueQuery := fmt.Sprintf(`SELECT last_value FROM "%s"."%s"`, schema, name)
+	lastValueRows, err := pool.Query(ctx, lastValueQuery)
+	if err == nil && len(lastValueRows) > 0 {
+		details.CurrentValue = toInt64(lastValueRows[0]["last_value"])
+	}
+
+	return details, nil
+}
+
+// GetExtensionDetails returns detailed information about an extension
+func GetExtensionDetails(ctx context.Context, pool *connection.Pool, name string) (*ExtensionDetails, error) {
+	query := `
+		SELECT
+			e.extname,
+			e.extversion,
+			n.nspname as schema,
+			c.description
+		FROM pg_extension e
+		JOIN pg_namespace n ON e.extnamespace = n.oid
+		LEFT JOIN pg_description c ON c.objoid = e.oid AND c.classoid = 'pg_extension'::regclass
+		WHERE e.extname = $1;
+	`
+
+	rows, err := pool.Query(ctx, query, name)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("extension %s not found", name)
+	}
+
+	row := rows[0]
+	return &ExtensionDetails{
+		Name:        toString(row["extname"]),
+		Version:     toString(row["extversion"]),
+		Schema:      toString(row["schema"]),
+		Description: toString(row["description"]),
+	}, nil
+}
+
+// GetCompositeTypeDetails returns detailed information about a composite type
+func GetCompositeTypeDetails(ctx context.Context, pool *connection.Pool, schema, name string) (*CompositeTypeDetails, error) {
+	query := `
+		SELECT
+			a.attname,
+			pg_catalog.format_type(a.atttypid, a.atttypmod) as type,
+			a.attnum as position
+		FROM pg_type t
+		JOIN pg_namespace n ON t.typnamespace = n.oid
+		JOIN pg_attribute a ON a.attrelid = t.typrelid
+		WHERE n.nspname = $1
+		  AND t.typname = $2
+		  AND a.attnum > 0
+		  AND NOT a.attisdropped
+		ORDER BY a.attnum;
+	`
+
+	rows, err := pool.Query(ctx, query, schema, name)
+	if err != nil {
+		return nil, err
+	}
+
+	details := &CompositeTypeDetails{
+		Schema:     schema,
+		Name:       name,
+		Attributes: make([]TypeAttribute, 0, len(rows)),
+	}
+
+	for _, row := range rows {
+		details.Attributes = append(details.Attributes, TypeAttribute{
+			Name:     toString(row["attname"]),
+			Type:     toString(row["type"]),
+			Position: int(toInt64(row["position"])),
+		})
+	}
+
+	return details, nil
+}
+
+// GetDomainTypeDetails returns detailed information about a domain type
+func GetDomainTypeDetails(ctx context.Context, pool *connection.Pool, schema, name string) (*DomainTypeDetails, error) {
+	query := `
+		SELECT
+			t.typname,
+			pg_catalog.format_type(t.typbasetype, t.typtypmod) as basetype,
+			t.typdefault as default_value,
+			t.typnotnull as not_null
+		FROM pg_type t
+		JOIN pg_namespace n ON t.typnamespace = n.oid
+		WHERE n.nspname = $1
+		  AND t.typname = $2
+		  AND t.typtype = 'd';
+	`
+
+	rows, err := pool.Query(ctx, query, schema, name)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("domain type %s.%s not found", schema, name)
+	}
+
+	row := rows[0]
+	details := &DomainTypeDetails{
+		Schema:   schema,
+		Name:     toString(row["typname"]),
+		BaseType: toString(row["basetype"]),
+		Default:  toString(row["default_value"]),
+		NotNull:  toBool(row["not_null"]),
+	}
+
+	// Get domain constraints
+	constraintQuery := `
+		SELECT pg_get_constraintdef(c.oid) as constraint_def
+		FROM pg_constraint c
+		JOIN pg_type t ON c.contypid = t.oid
+		JOIN pg_namespace n ON t.typnamespace = n.oid
+		WHERE n.nspname = $1 AND t.typname = $2;
+	`
+
+	constraintRows, err := pool.Query(ctx, constraintQuery, schema, name)
+	if err == nil {
+		for _, cr := range constraintRows {
+			details.Constraints = append(details.Constraints, toString(cr["constraint_def"]))
+		}
+	}
+
+	return details, nil
+}
+
 // Helper functions for type conversion
 func toInt64(v interface{}) int64 {
 	if v == nil {

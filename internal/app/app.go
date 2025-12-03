@@ -87,6 +87,10 @@ type App struct {
 	structureView     *components.StructureView
 	currentTab        int // 0=Data, 1=Columns, 2=Constraints, 3=Indexes
 
+	// Object details display (for functions, sequences, extensions, types, etc.)
+	objectDetailsTitle   string
+	objectDetailsContent string
+
 	// Favorites
 	showFavorites    bool
 	favoritesManager *favorites.Manager
@@ -201,6 +205,14 @@ type TableDataLoadedMsg struct {
 type QueryResultMsg struct {
 	SQL    string
 	Result models.QueryResult
+}
+
+// ObjectDetailsLoadedMsg is sent when object details are loaded
+type ObjectDetailsLoadedMsg struct {
+	ObjectType string // "function", "sequence", "extension", "type", "index", "trigger"
+	Title      string
+	Content    string // Formatted content to display
+	Err        error
 }
 
 // New creates a new App instance with config
@@ -1347,6 +1359,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.state.TreeSelected = msg.Node
 			a.currentTable = schemaName + "." + msg.Node.Label
 
+			// Clear object details (we're now showing table data)
+			a.objectDetailsTitle = ""
+			a.objectDetailsContent = ""
+
 			// Load table/view data
 			return a, a.loadTableData(LoadTableDataMsg{
 				Schema: schemaName,
@@ -1355,31 +1371,65 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Limit:  100,
 			})
 
-		case models.TreeNodeTypeFunction, models.TreeNodeTypeProcedure, models.TreeNodeTypeTriggerFunction:
-			// TODO: Display function/procedure source code
+		case models.TreeNodeTypeFunction, models.TreeNodeTypeProcedure:
+			// Display function/procedure source code
 			a.state.TreeSelected = msg.Node
-			return a, nil
+			a.currentTable = "" // Clear current table
+			return a, a.loadFunctionSource(msg.Node)
+
+		case models.TreeNodeTypeTriggerFunction:
+			// Display trigger function source code
+			a.state.TreeSelected = msg.Node
+			a.currentTable = "" // Clear current table
+			return a, a.loadTriggerFunctionSource(msg.Node)
 
 		case models.TreeNodeTypeSequence:
-			// TODO: Display sequence properties
+			// Display sequence properties
 			a.state.TreeSelected = msg.Node
-			return a, nil
+			a.currentTable = "" // Clear current table
+			return a, a.loadSequenceDetails(msg.Node)
 
-		case models.TreeNodeTypeIndex, models.TreeNodeTypeTrigger:
-			// TODO: Display DDL definition
+		case models.TreeNodeTypeIndex:
+			// Display index DDL definition
 			a.state.TreeSelected = msg.Node
-			return a, nil
+			a.currentTable = "" // Clear current table
+			return a, a.loadIndexDetails(msg.Node)
+
+		case models.TreeNodeTypeTrigger:
+			// Display trigger DDL definition
+			a.state.TreeSelected = msg.Node
+			a.currentTable = "" // Clear current table
+			return a, a.loadTriggerDetails(msg.Node)
 
 		case models.TreeNodeTypeExtension:
-			// TODO: Display extension info
+			// Display extension info
 			a.state.TreeSelected = msg.Node
-			return a, nil
+			a.currentTable = "" // Clear current table
+			return a, a.loadExtensionDetails(msg.Node)
 
-		case models.TreeNodeTypeCompositeType, models.TreeNodeTypeEnumType,
-			models.TreeNodeTypeDomainType, models.TreeNodeTypeRangeType:
-			// TODO: Display type definition
+		case models.TreeNodeTypeCompositeType:
+			// Display composite type definition
 			a.state.TreeSelected = msg.Node
-			return a, nil
+			a.currentTable = "" // Clear current table
+			return a, a.loadCompositeTypeDetails(msg.Node)
+
+		case models.TreeNodeTypeEnumType:
+			// Display enum type definition
+			a.state.TreeSelected = msg.Node
+			a.currentTable = "" // Clear current table
+			return a, a.loadEnumTypeDetails(msg.Node)
+
+		case models.TreeNodeTypeDomainType:
+			// Display domain type definition
+			a.state.TreeSelected = msg.Node
+			a.currentTable = "" // Clear current table
+			return a, a.loadDomainTypeDetails(msg.Node)
+
+		case models.TreeNodeTypeRangeType:
+			// Display range type definition
+			a.state.TreeSelected = msg.Node
+			a.currentTable = "" // Clear current table
+			return a, a.loadRangeTypeDetails(msg.Node)
 
 		default:
 			return a, nil
@@ -1387,6 +1437,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case LoadTableDataMsg:
 		return a, a.loadTableData(msg)
+
+	case ObjectDetailsLoadedMsg:
+		if msg.Err != nil {
+			a.ShowError("Error", fmt.Sprintf("Failed to load %s details:\n\n%v", msg.ObjectType, msg.Err))
+			return a, nil
+		}
+		// Store the object details for display
+		a.objectDetailsTitle = msg.Title
+		a.objectDetailsContent = msg.Content
+		a.state.FocusedPanel = models.RightPanel
+		a.updatePanelStyles()
+		return a, nil
 
 	case TableDataLoadedMsg:
 		if msg.Err != nil {
@@ -1894,6 +1956,11 @@ func (a *App) renderDataPanel(width, height int) string {
 		return mainContent
 	}
 
+	// If we have object details to display (function source, sequence info, etc.)
+	if a.objectDetailsContent != "" {
+		return a.renderObjectDetails(width, height)
+	}
+
 	// No data - show placeholder
 	placeholderStyle := lipgloss.NewStyle().
 		Foreground(a.theme.Comment).
@@ -1902,6 +1969,43 @@ func (a *App) renderDataPanel(width, height int) string {
 		Align(lipgloss.Center, lipgloss.Center)
 
 	return placeholderStyle.Render("No data to display\n\nPress Ctrl+E to open SQL editor")
+}
+
+// renderObjectDetails renders the object details panel (function source, sequence properties, etc.)
+func (a *App) renderObjectDetails(width, height int) string {
+	// Title style
+	titleStyle := lipgloss.NewStyle().
+		Foreground(a.theme.Info).
+		Bold(true).
+		Padding(0, 1)
+
+	// Content style
+	contentStyle := lipgloss.NewStyle().
+		Foreground(a.theme.Foreground).
+		Width(width).
+		Padding(1, 2)
+
+	// Render title
+	title := titleStyle.Render(a.objectDetailsTitle)
+
+	// Split content into lines and handle scrolling if needed
+	lines := strings.Split(a.objectDetailsContent, "\n")
+
+	// Calculate available height for content (subtract title line)
+	contentHeight := height - 2
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+
+	// For now, just truncate to fit (TODO: add scrolling support)
+	if len(lines) > contentHeight {
+		lines = lines[:contentHeight-1]
+		lines = append(lines, "... (content truncated)")
+	}
+
+	content := contentStyle.Render(strings.Join(lines, "\n"))
+
+	return lipgloss.JoinVertical(lipgloss.Left, title, content)
 }
 
 // updatePanelDimensions calculates panel sizes based on window size
@@ -3635,5 +3739,435 @@ func (a *App) openExternalEditor(content string) tea.Cmd {
 		}
 
 		return components.ExternalEditorResultMsg{Content: string(result)}
+	}
+}
+
+// getSchemaFromNode traverses up the tree to find the schema name
+func (a *App) getSchemaFromNode(node *models.TreeNode) string {
+	current := node.Parent
+	for current != nil {
+		if current.Type == models.TreeNodeTypeSchema {
+			// Schema label might have count info, split by space
+			return strings.Split(current.Label, " ")[0]
+		}
+		current = current.Parent
+	}
+	return ""
+}
+
+// getTableFromNode traverses up the tree to find the table name (for indexes/triggers)
+func (a *App) getTableFromNode(node *models.TreeNode) string {
+	current := node.Parent
+	for current != nil {
+		if current.Type == models.TreeNodeTypeTable {
+			return current.Label
+		}
+		// Skip group nodes (IndexGroup, TriggerGroup)
+		current = current.Parent
+	}
+	return ""
+}
+
+// loadFunctionSource loads the source code of a function or procedure
+func (a *App) loadFunctionSource(node *models.TreeNode) tea.Cmd {
+	return func() tea.Msg {
+		conn, err := a.connectionManager.GetActive()
+		if err != nil {
+			return ObjectDetailsLoadedMsg{ObjectType: "function", Err: err}
+		}
+
+		schema := a.getSchemaFromNode(node)
+		if schema == "" {
+			return ObjectDetailsLoadedMsg{ObjectType: "function", Err: fmt.Errorf("could not determine schema")}
+		}
+
+		// Parse function name and arguments from node label
+		// Label format: "function_name(args)" or just "function_name"
+		name := node.Label
+		args := ""
+		if idx := strings.Index(name, "("); idx != -1 {
+			args = name[idx+1 : len(name)-1] // Remove parentheses
+			name = name[:idx]
+		}
+
+		ctx := context.Background()
+		source, err := metadata.GetFunctionSource(ctx, conn.Pool, schema, name, args)
+		if err != nil {
+			return ObjectDetailsLoadedMsg{ObjectType: "function", Err: err}
+		}
+
+		title := fmt.Sprintf("%s.%s(%s)", schema, source.Name, source.Arguments)
+		content := source.Definition
+
+		return ObjectDetailsLoadedMsg{
+			ObjectType: "function",
+			Title:      title,
+			Content:    content,
+		}
+	}
+}
+
+// loadTriggerFunctionSource loads the source code of a trigger function
+func (a *App) loadTriggerFunctionSource(node *models.TreeNode) tea.Cmd {
+	return func() tea.Msg {
+		conn, err := a.connectionManager.GetActive()
+		if err != nil {
+			return ObjectDetailsLoadedMsg{ObjectType: "trigger_function", Err: err}
+		}
+
+		schema := a.getSchemaFromNode(node)
+		if schema == "" {
+			return ObjectDetailsLoadedMsg{ObjectType: "trigger_function", Err: fmt.Errorf("could not determine schema")}
+		}
+
+		ctx := context.Background()
+		source, err := metadata.GetTriggerFunctionSource(ctx, conn.Pool, schema, node.Label)
+		if err != nil {
+			return ObjectDetailsLoadedMsg{ObjectType: "trigger_function", Err: err}
+		}
+
+		title := fmt.Sprintf("%s.%s() → trigger", schema, source.Name)
+		content := source.Definition
+
+		return ObjectDetailsLoadedMsg{
+			ObjectType: "trigger_function",
+			Title:      title,
+			Content:    content,
+		}
+	}
+}
+
+// loadSequenceDetails loads sequence properties
+func (a *App) loadSequenceDetails(node *models.TreeNode) tea.Cmd {
+	return func() tea.Msg {
+		conn, err := a.connectionManager.GetActive()
+		if err != nil {
+			return ObjectDetailsLoadedMsg{ObjectType: "sequence", Err: err}
+		}
+
+		schema := a.getSchemaFromNode(node)
+		if schema == "" {
+			return ObjectDetailsLoadedMsg{ObjectType: "sequence", Err: fmt.Errorf("could not determine schema")}
+		}
+
+		ctx := context.Background()
+		details, err := metadata.GetSequenceDetails(ctx, conn.Pool, schema, node.Label)
+		if err != nil {
+			return ObjectDetailsLoadedMsg{ObjectType: "sequence", Err: err}
+		}
+
+		// Format as a properties table
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("Sequence: %s.%s\n", schema, details.Name))
+		b.WriteString(strings.Repeat("─", 50) + "\n\n")
+		b.WriteString(fmt.Sprintf("  Current Value:  %d\n", details.CurrentValue))
+		b.WriteString(fmt.Sprintf("  Start Value:    %d\n", details.StartValue))
+		b.WriteString(fmt.Sprintf("  Minimum:        %d\n", details.MinValue))
+		b.WriteString(fmt.Sprintf("  Maximum:        %d\n", details.MaxValue))
+		b.WriteString(fmt.Sprintf("  Increment:      %d\n", details.Increment))
+		b.WriteString(fmt.Sprintf("  Cycle:          %v\n", details.Cycle))
+		b.WriteString(fmt.Sprintf("  Owner:          %s\n", details.Owner))
+
+		return ObjectDetailsLoadedMsg{
+			ObjectType: "sequence",
+			Title:      fmt.Sprintf("%s.%s", schema, details.Name),
+			Content:    b.String(),
+		}
+	}
+}
+
+// loadIndexDetails loads index DDL definition
+func (a *App) loadIndexDetails(node *models.TreeNode) tea.Cmd {
+	return func() tea.Msg {
+		conn, err := a.connectionManager.GetActive()
+		if err != nil {
+			return ObjectDetailsLoadedMsg{ObjectType: "index", Err: err}
+		}
+
+		schema := a.getSchemaFromNode(node)
+		table := a.getTableFromNode(node)
+		if schema == "" || table == "" {
+			return ObjectDetailsLoadedMsg{ObjectType: "index", Err: fmt.Errorf("could not determine schema/table")}
+		}
+
+		ctx := context.Background()
+		indexes, err := metadata.ListTableIndexes(ctx, conn.Pool, schema, table)
+		if err != nil {
+			return ObjectDetailsLoadedMsg{ObjectType: "index", Err: err}
+		}
+
+		// Find the specific index
+		var content string
+		for _, idx := range indexes {
+			if idx.Name == node.Label {
+				content = idx.Definition
+				break
+			}
+		}
+
+		if content == "" {
+			return ObjectDetailsLoadedMsg{ObjectType: "index", Err: fmt.Errorf("index %s not found", node.Label)}
+		}
+
+		return ObjectDetailsLoadedMsg{
+			ObjectType: "index",
+			Title:      fmt.Sprintf("%s.%s (on %s)", schema, node.Label, table),
+			Content:    content,
+		}
+	}
+}
+
+// loadTriggerDetails loads trigger DDL definition
+func (a *App) loadTriggerDetails(node *models.TreeNode) tea.Cmd {
+	return func() tea.Msg {
+		conn, err := a.connectionManager.GetActive()
+		if err != nil {
+			return ObjectDetailsLoadedMsg{ObjectType: "trigger", Err: err}
+		}
+
+		schema := a.getSchemaFromNode(node)
+		table := a.getTableFromNode(node)
+		if schema == "" || table == "" {
+			return ObjectDetailsLoadedMsg{ObjectType: "trigger", Err: fmt.Errorf("could not determine schema/table")}
+		}
+
+		ctx := context.Background()
+		triggers, err := metadata.ListTableTriggers(ctx, conn.Pool, schema, table)
+		if err != nil {
+			return ObjectDetailsLoadedMsg{ObjectType: "trigger", Err: err}
+		}
+
+		// Find the specific trigger
+		var content string
+		for _, trg := range triggers {
+			if trg.Name == node.Label {
+				content = trg.Definition
+				break
+			}
+		}
+
+		if content == "" {
+			return ObjectDetailsLoadedMsg{ObjectType: "trigger", Err: fmt.Errorf("trigger %s not found", node.Label)}
+		}
+
+		return ObjectDetailsLoadedMsg{
+			ObjectType: "trigger",
+			Title:      fmt.Sprintf("%s.%s (on %s)", schema, node.Label, table),
+			Content:    content,
+		}
+	}
+}
+
+// loadExtensionDetails loads extension information
+func (a *App) loadExtensionDetails(node *models.TreeNode) tea.Cmd {
+	return func() tea.Msg {
+		conn, err := a.connectionManager.GetActive()
+		if err != nil {
+			return ObjectDetailsLoadedMsg{ObjectType: "extension", Err: err}
+		}
+
+		// Parse extension name from label (format: "name vX.Y")
+		name := node.Label
+		if idx := strings.Index(name, " v"); idx != -1 {
+			name = name[:idx]
+		}
+
+		ctx := context.Background()
+		details, err := metadata.GetExtensionDetails(ctx, conn.Pool, name)
+		if err != nil {
+			return ObjectDetailsLoadedMsg{ObjectType: "extension", Err: err}
+		}
+
+		// Format as a properties display
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("Extension: %s\n", details.Name))
+		b.WriteString(strings.Repeat("─", 50) + "\n\n")
+		b.WriteString(fmt.Sprintf("  Version:     %s\n", details.Version))
+		b.WriteString(fmt.Sprintf("  Schema:      %s\n", details.Schema))
+		if details.Description != "" {
+			b.WriteString(fmt.Sprintf("\nDescription:\n  %s\n", details.Description))
+		}
+
+		return ObjectDetailsLoadedMsg{
+			ObjectType: "extension",
+			Title:      details.Name,
+			Content:    b.String(),
+		}
+	}
+}
+
+// loadCompositeTypeDetails loads composite type definition
+func (a *App) loadCompositeTypeDetails(node *models.TreeNode) tea.Cmd {
+	return func() tea.Msg {
+		conn, err := a.connectionManager.GetActive()
+		if err != nil {
+			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: err}
+		}
+
+		schema := a.getSchemaFromNode(node)
+		if schema == "" {
+			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: fmt.Errorf("could not determine schema")}
+		}
+
+		ctx := context.Background()
+		details, err := metadata.GetCompositeTypeDetails(ctx, conn.Pool, schema, node.Label)
+		if err != nil {
+			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: err}
+		}
+
+		// Format as CREATE TYPE statement
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("CREATE TYPE %s.%s AS (\n", schema, details.Name))
+		for i, attr := range details.Attributes {
+			comma := ","
+			if i == len(details.Attributes)-1 {
+				comma = ""
+			}
+			b.WriteString(fmt.Sprintf("    %s %s%s\n", attr.Name, attr.Type, comma))
+		}
+		b.WriteString(");")
+
+		return ObjectDetailsLoadedMsg{
+			ObjectType: "type",
+			Title:      fmt.Sprintf("%s.%s (composite)", schema, details.Name),
+			Content:    b.String(),
+		}
+	}
+}
+
+// loadEnumTypeDetails loads enum type definition
+func (a *App) loadEnumTypeDetails(node *models.TreeNode) tea.Cmd {
+	return func() tea.Msg {
+		conn, err := a.connectionManager.GetActive()
+		if err != nil {
+			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: err}
+		}
+
+		schema := a.getSchemaFromNode(node)
+		if schema == "" {
+			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: fmt.Errorf("could not determine schema")}
+		}
+
+		ctx := context.Background()
+		enums, err := metadata.ListEnumTypes(ctx, conn.Pool, schema)
+		if err != nil {
+			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: err}
+		}
+
+		// Find the specific enum
+		var enumType *metadata.EnumType
+		for _, e := range enums {
+			if e.Name == node.Label {
+				enumType = &e
+				break
+			}
+		}
+
+		if enumType == nil {
+			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: fmt.Errorf("enum type %s not found", node.Label)}
+		}
+
+		// Format as CREATE TYPE statement
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("CREATE TYPE %s.%s AS ENUM (\n", schema, enumType.Name))
+		for i, label := range enumType.Labels {
+			comma := ","
+			if i == len(enumType.Labels)-1 {
+				comma = ""
+			}
+			b.WriteString(fmt.Sprintf("    '%s'%s\n", label, comma))
+		}
+		b.WriteString(");")
+
+		return ObjectDetailsLoadedMsg{
+			ObjectType: "type",
+			Title:      fmt.Sprintf("%s.%s (enum)", schema, enumType.Name),
+			Content:    b.String(),
+		}
+	}
+}
+
+// loadDomainTypeDetails loads domain type definition
+func (a *App) loadDomainTypeDetails(node *models.TreeNode) tea.Cmd {
+	return func() tea.Msg {
+		conn, err := a.connectionManager.GetActive()
+		if err != nil {
+			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: err}
+		}
+
+		schema := a.getSchemaFromNode(node)
+		if schema == "" {
+			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: fmt.Errorf("could not determine schema")}
+		}
+
+		ctx := context.Background()
+		details, err := metadata.GetDomainTypeDetails(ctx, conn.Pool, schema, node.Label)
+		if err != nil {
+			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: err}
+		}
+
+		// Format as CREATE DOMAIN statement
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("CREATE DOMAIN %s.%s AS %s", schema, details.Name, details.BaseType))
+		if details.NotNull {
+			b.WriteString(" NOT NULL")
+		}
+		if details.Default != "" {
+			b.WriteString(fmt.Sprintf(" DEFAULT %s", details.Default))
+		}
+		for _, constraint := range details.Constraints {
+			b.WriteString(fmt.Sprintf("\n    %s", constraint))
+		}
+		b.WriteString(";")
+
+		return ObjectDetailsLoadedMsg{
+			ObjectType: "type",
+			Title:      fmt.Sprintf("%s.%s (domain)", schema, details.Name),
+			Content:    b.String(),
+		}
+	}
+}
+
+// loadRangeTypeDetails loads range type definition
+func (a *App) loadRangeTypeDetails(node *models.TreeNode) tea.Cmd {
+	return func() tea.Msg {
+		conn, err := a.connectionManager.GetActive()
+		if err != nil {
+			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: err}
+		}
+
+		schema := a.getSchemaFromNode(node)
+		if schema == "" {
+			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: fmt.Errorf("could not determine schema")}
+		}
+
+		ctx := context.Background()
+		ranges, err := metadata.ListRangeTypes(ctx, conn.Pool, schema)
+		if err != nil {
+			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: err}
+		}
+
+		// Find the specific range type
+		var rangeType *metadata.RangeType
+		for _, r := range ranges {
+			if r.Name == node.Label {
+				rangeType = &r
+				break
+			}
+		}
+
+		if rangeType == nil {
+			return ObjectDetailsLoadedMsg{ObjectType: "type", Err: fmt.Errorf("range type %s not found", node.Label)}
+		}
+
+		// Format as CREATE TYPE statement
+		content := fmt.Sprintf("CREATE TYPE %s.%s AS RANGE (\n    SUBTYPE = %s\n);",
+			schema, rangeType.Name, rangeType.Subtype)
+
+		return ObjectDetailsLoadedMsg{
+			ObjectType: "type",
+			Title:      fmt.Sprintf("%s.%s (range)", schema, rangeType.Name),
+			Content:    content,
+		}
 	}
 }
