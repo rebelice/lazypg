@@ -146,6 +146,15 @@ func (p *Pool) QueryRow(ctx context.Context, sql string, args ...interface{}) (m
 	return rows[0], nil
 }
 
+// Execute executes a statement without returning rows (INSERT, UPDATE, DELETE, CREATE, etc.)
+func (p *Pool) Execute(ctx context.Context, sql string, args ...interface{}) (int64, error) {
+	result, err := p.pool.Exec(ctx, sql, args...)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 // buildConnectionString creates a PostgreSQL connection string
 func buildConnectionString(config models.ConnectionConfig) string {
 	sslMode := config.SSLMode

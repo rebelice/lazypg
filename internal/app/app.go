@@ -87,9 +87,9 @@ type App struct {
 	structureView     *components.StructureView
 	currentTab        int // 0=Data, 1=Columns, 2=Constraints, 3=Indexes
 
-	// Object details display (for functions, sequences, extensions, types, etc.)
-	objectDetailsTitle   string
-	objectDetailsContent string
+	// Code editor for viewing/editing database object definitions
+	codeEditor     *components.CodeEditor
+	showCodeEditor bool
 
 	// Favorites
 	showFavorites    bool
@@ -210,6 +210,7 @@ type QueryResultMsg struct {
 // ObjectDetailsLoadedMsg is sent when object details are loaded
 type ObjectDetailsLoadedMsg struct {
 	ObjectType string // "function", "sequence", "extension", "type", "index", "trigger"
+	ObjectName string // "schema.name" for save operations
 	Title      string
 	Content    string // Formatted content to display
 	Err        error
@@ -798,6 +799,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.handleSearchInput(msg)
 		}
 
+		// Handle code editor input if visible
+		if a.showCodeEditor && a.codeEditor != nil {
+			_, cmd := a.codeEditor.Update(msg)
+			return a, cmd
+		}
+
 		// If SQL editor is focused, route input there
 		if a.sqlEditorFocused {
 			// Handle escape to unfocus
@@ -1359,9 +1366,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.state.TreeSelected = msg.Node
 			a.currentTable = schemaName + "." + msg.Node.Label
 
-			// Clear object details (we're now showing table data)
-			a.objectDetailsTitle = ""
-			a.objectDetailsContent = ""
+			// Close code editor (we're now showing table data)
+			a.showCodeEditor = false
+			a.codeEditor = nil
 
 			// Load table/view data
 			return a, a.loadTableData(LoadTableDataMsg{
@@ -1443,11 +1450,38 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.ShowError("Error", fmt.Sprintf("Failed to load %s details:\n\n%v", msg.ObjectType, msg.Err))
 			return a, nil
 		}
-		// Store the object details for display
-		a.objectDetailsTitle = msg.Title
-		a.objectDetailsContent = msg.Content
+		// Create code editor to display the object details
+		a.codeEditor = components.NewCodeEditor(a.theme)
+		a.codeEditor.SetContent(msg.Content, msg.ObjectType, msg.Title)
+		a.codeEditor.ObjectName = msg.ObjectName
+		a.showCodeEditor = true
 		a.state.FocusedPanel = models.RightPanel
 		a.updatePanelStyles()
+		return a, nil
+
+	case components.CodeEditorCloseMsg:
+		// Close the code editor and return to tree navigation
+		a.showCodeEditor = false
+		a.codeEditor = nil
+		a.state.FocusedPanel = models.LeftPanel
+		a.updatePanelStyles()
+		return a, nil
+
+	case components.SaveObjectMsg:
+		// Execute the save SQL
+		return a, a.saveObjectDefinition(msg)
+
+	case components.ObjectSavedMsg:
+		if msg.Error != nil {
+			a.ShowError("Save Error", fmt.Sprintf("Failed to save object:\n\n%v", msg.Error))
+			return a, nil
+		}
+		// Success - update the code editor's original content and exit edit mode
+		if a.codeEditor != nil {
+			a.codeEditor.Original = a.codeEditor.GetContent()
+			a.codeEditor.Modified = false
+			a.codeEditor.ExitEditMode(false) // Keep changes
+		}
 		return a, nil
 
 	case TableDataLoadedMsg:
@@ -1956,9 +1990,11 @@ func (a *App) renderDataPanel(width, height int) string {
 		return mainContent
 	}
 
-	// If we have object details to display (function source, sequence info, etc.)
-	if a.objectDetailsContent != "" {
-		return a.renderObjectDetails(width, height)
+	// If we have code editor to display (function source, sequence info, etc.)
+	if a.showCodeEditor && a.codeEditor != nil {
+		a.codeEditor.Width = width
+		a.codeEditor.Height = height
+		return a.codeEditor.View()
 	}
 
 	// No data - show placeholder
@@ -1969,48 +2005,6 @@ func (a *App) renderDataPanel(width, height int) string {
 		Align(lipgloss.Center, lipgloss.Center)
 
 	return placeholderStyle.Render("No data to display\n\nPress Ctrl+E to open SQL editor")
-}
-
-// renderObjectDetails renders the object details panel (function source, sequence properties, etc.)
-func (a *App) renderObjectDetails(width, height int) string {
-	// Title style (1 line)
-	titleStyle := lipgloss.NewStyle().
-		Foreground(a.theme.Info).
-		Bold(true).
-		Width(width)
-
-	// Render title
-	title := titleStyle.Render("  " + a.objectDetailsTitle)
-
-	// Calculate available height for content (subtract title line)
-	contentHeight := height - 1
-	if contentHeight < 1 {
-		contentHeight = 1
-	}
-
-	// Split content into lines
-	lines := strings.Split(a.objectDetailsContent, "\n")
-
-	// Truncate to fit available height
-	if len(lines) > contentHeight {
-		lines = lines[:contentHeight-1]
-		lines = append(lines, "  ... (content truncated)")
-	}
-
-	// Pad with empty lines if content is shorter than available height
-	for len(lines) < contentHeight {
-		lines = append(lines, "")
-	}
-
-	// Content style with fixed height
-	contentStyle := lipgloss.NewStyle().
-		Foreground(a.theme.Foreground).
-		Width(width).
-		Height(contentHeight)
-
-	content := contentStyle.Render(strings.Join(lines, "\n"))
-
-	return lipgloss.JoinVertical(lipgloss.Left, title, content)
 }
 
 // updatePanelDimensions calculates panel sizes based on window size
@@ -3806,6 +3800,7 @@ func (a *App) loadFunctionSource(node *models.TreeNode) tea.Cmd {
 
 		return ObjectDetailsLoadedMsg{
 			ObjectType: "function",
+			ObjectName: fmt.Sprintf("%s.%s(%s)", schema, source.Name, source.Arguments),
 			Title:      title,
 			Content:    content,
 		}
@@ -3836,6 +3831,7 @@ func (a *App) loadTriggerFunctionSource(node *models.TreeNode) tea.Cmd {
 
 		return ObjectDetailsLoadedMsg{
 			ObjectType: "trigger_function",
+			ObjectName: fmt.Sprintf("%s.%s", schema, source.Name),
 			Title:      title,
 			Content:    content,
 		}
@@ -4174,5 +4170,28 @@ func (a *App) loadRangeTypeDetails(node *models.TreeNode) tea.Cmd {
 			Title:      fmt.Sprintf("%s.%s (range)", schema, rangeType.Name),
 			Content:    content,
 		}
+	}
+}
+
+// saveObjectDefinition executes the SQL to save an object definition
+func (a *App) saveObjectDefinition(msg components.SaveObjectMsg) tea.Cmd {
+	return func() tea.Msg {
+		conn, err := a.connectionManager.GetActive()
+		if err != nil {
+			return components.ObjectSavedMsg{Success: false, Error: err}
+		}
+
+		ctx := context.Background()
+
+		// The content should be the full CREATE OR REPLACE statement for functions/procedures
+		// For other object types, we may need to generate appropriate SQL
+		sql := msg.Content
+
+		_, err = conn.Pool.Execute(ctx, sql)
+		if err != nil {
+			return components.ObjectSavedMsg{Success: false, Error: err}
+		}
+
+		return components.ObjectSavedMsg{Success: true}
 	}
 }
