@@ -3872,17 +3872,24 @@ func (a *App) loadSequenceDetails(node *models.TreeNode) tea.Cmd {
 			return ObjectDetailsLoadedMsg{ObjectType: "sequence", Err: err}
 		}
 
-		// Format as a properties table
+		// Format as CREATE SEQUENCE statement
 		var b strings.Builder
-		b.WriteString(fmt.Sprintf("Sequence: %s.%s\n", schema, details.Name))
-		b.WriteString(strings.Repeat("─", 50) + "\n\n")
-		b.WriteString(fmt.Sprintf("  Current Value:  %d\n", details.CurrentValue))
-		b.WriteString(fmt.Sprintf("  Start Value:    %d\n", details.StartValue))
-		b.WriteString(fmt.Sprintf("  Minimum:        %d\n", details.MinValue))
-		b.WriteString(fmt.Sprintf("  Maximum:        %d\n", details.MaxValue))
-		b.WriteString(fmt.Sprintf("  Increment:      %d\n", details.Increment))
-		b.WriteString(fmt.Sprintf("  Cycle:          %v\n", details.Cycle))
-		b.WriteString(fmt.Sprintf("  Owner:          %s\n", details.Owner))
+		b.WriteString(fmt.Sprintf("-- Current Value: %d\n", details.CurrentValue))
+		if details.Owner != "" {
+			b.WriteString(fmt.Sprintf("-- Owner: %s\n", details.Owner))
+		}
+		b.WriteString("\n")
+		b.WriteString(fmt.Sprintf("CREATE SEQUENCE %s.%s\n", schema, details.Name))
+		b.WriteString(fmt.Sprintf("    INCREMENT BY %d\n", details.Increment))
+		b.WriteString(fmt.Sprintf("    MINVALUE %d\n", details.MinValue))
+		b.WriteString(fmt.Sprintf("    MAXVALUE %d\n", details.MaxValue))
+		b.WriteString(fmt.Sprintf("    START WITH %d\n", details.StartValue))
+		if details.Cycle {
+			b.WriteString("    CYCLE")
+		} else {
+			b.WriteString("    NO CYCLE")
+		}
+		b.WriteString(";")
 
 		return ObjectDetailsLoadedMsg{
 			ObjectType: "sequence",
@@ -3994,15 +4001,17 @@ func (a *App) loadExtensionDetails(node *models.TreeNode) tea.Cmd {
 			return ObjectDetailsLoadedMsg{ObjectType: "extension", Err: err}
 		}
 
-		// Format as a properties display
+		// Format as CREATE EXTENSION statement
 		var b strings.Builder
-		b.WriteString(fmt.Sprintf("Extension: %s\n", details.Name))
-		b.WriteString(strings.Repeat("─", 50) + "\n\n")
-		b.WriteString(fmt.Sprintf("  Version:     %s\n", details.Version))
-		b.WriteString(fmt.Sprintf("  Schema:      %s\n", details.Schema))
+		b.WriteString(fmt.Sprintf("-- Extension: %s\n", details.Name))
+		b.WriteString(fmt.Sprintf("-- Version: %s\n", details.Version))
 		if details.Description != "" {
-			b.WriteString(fmt.Sprintf("\nDescription:\n  %s\n", details.Description))
+			b.WriteString(fmt.Sprintf("-- %s\n", details.Description))
 		}
+		b.WriteString("\n")
+		b.WriteString(fmt.Sprintf("CREATE EXTENSION IF NOT EXISTS %s\n", details.Name))
+		b.WriteString(fmt.Sprintf("    SCHEMA %s\n", details.Schema))
+		b.WriteString(fmt.Sprintf("    VERSION '%s';", details.Version))
 
 		return ObjectDetailsLoadedMsg{
 			ObjectType: "extension",
