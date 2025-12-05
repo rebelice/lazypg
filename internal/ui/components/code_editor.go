@@ -342,14 +342,15 @@ func (ce *CodeEditor) View() string {
 	}
 
 	verticalFrameSize := borderStyle.GetVerticalFrameSize()
-	// Reserve: 1 for title, 1 for separator, 1 for status bar
-	contentHeight := ce.Height - verticalFrameSize - 3
+	// Reserve: 1 for title, 1 for title separator, 1 for bottom separator, 1 for status bar
+	contentHeight := ce.Height - verticalFrameSize - 4
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
 
-	// Build title bar
+	// Build title bar with separator below
 	titleBar := ce.renderTitleBar(contentWidth)
+	titleSeparator := ce.renderSeparator(contentWidth)
 
 	// Build content lines
 	var contentLines []string
@@ -381,7 +382,7 @@ func (ce *CodeEditor) View() string {
 	statusBar := ce.renderStatusBar(contentWidth)
 
 	// Join all parts
-	allLines := []string{titleBar}
+	allLines := []string{titleBar, titleSeparator}
 	allLines = append(allLines, contentLines...)
 	allLines = append(allLines, separator, statusBar)
 
