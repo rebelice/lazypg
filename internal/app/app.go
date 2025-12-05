@@ -802,16 +802,22 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle code editor input if visible (only in read-only mode)
 		// In edit mode, code editor captures all keys except global shortcuts
 		if a.showCodeEditor && a.codeEditor != nil {
-			// Allow Tab to close code editor and switch focus (in read-only mode)
+			// Allow Tab to switch focus without closing (in read-only mode)
 			if a.codeEditor.ReadOnly && msg.String() == "tab" {
-				a.showCodeEditor = false
-				a.codeEditor = nil
-				a.state.FocusedPanel = models.LeftPanel
+				// Toggle focus between panels
+				if a.state.FocusedPanel == models.RightPanel {
+					a.state.FocusedPanel = models.LeftPanel
+				} else {
+					a.state.FocusedPanel = models.RightPanel
+				}
 				a.updatePanelStyles()
 				return a, nil
 			}
-			_, cmd := a.codeEditor.Update(msg)
-			return a, cmd
+			// Only route to code editor when right panel is focused
+			if a.state.FocusedPanel == models.RightPanel {
+				_, cmd := a.codeEditor.Update(msg)
+				return a, cmd
+			}
 		}
 
 		// If SQL editor is focused, route input there
