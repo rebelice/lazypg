@@ -1973,35 +1973,40 @@ func (a *App) renderDataPanel(width, height int) string {
 
 // renderObjectDetails renders the object details panel (function source, sequence properties, etc.)
 func (a *App) renderObjectDetails(width, height int) string {
-	// Title style
+	// Title style (1 line)
 	titleStyle := lipgloss.NewStyle().
 		Foreground(a.theme.Info).
 		Bold(true).
-		Padding(0, 1)
-
-	// Content style
-	contentStyle := lipgloss.NewStyle().
-		Foreground(a.theme.Foreground).
-		Width(width).
-		Padding(1, 2)
+		Width(width)
 
 	// Render title
-	title := titleStyle.Render(a.objectDetailsTitle)
-
-	// Split content into lines and handle scrolling if needed
-	lines := strings.Split(a.objectDetailsContent, "\n")
+	title := titleStyle.Render("  " + a.objectDetailsTitle)
 
 	// Calculate available height for content (subtract title line)
-	contentHeight := height - 2
+	contentHeight := height - 1
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
 
-	// For now, just truncate to fit (TODO: add scrolling support)
+	// Split content into lines
+	lines := strings.Split(a.objectDetailsContent, "\n")
+
+	// Truncate to fit available height
 	if len(lines) > contentHeight {
 		lines = lines[:contentHeight-1]
-		lines = append(lines, "... (content truncated)")
+		lines = append(lines, "  ... (content truncated)")
 	}
+
+	// Pad with empty lines if content is shorter than available height
+	for len(lines) < contentHeight {
+		lines = append(lines, "")
+	}
+
+	// Content style with fixed height
+	contentStyle := lipgloss.NewStyle().
+		Foreground(a.theme.Foreground).
+		Width(width).
+		Height(contentHeight)
 
 	content := contentStyle.Render(strings.Join(lines, "\n"))
 
