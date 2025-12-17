@@ -52,6 +52,7 @@ type CodeEditor struct {
 	ReadOnly bool   // true = view mode, false = edit mode
 	Modified bool   // true if content changed from original
 	Original string // Original content for comparison
+	Focused  bool   // true if this editor has focus
 
 	// Theme
 	Theme theme.Theme
@@ -328,9 +329,9 @@ func (ce *CodeEditor) View() string {
 		return ""
 	}
 
-	// Choose border style based on mode
+	// Choose border style based on focus and edit mode
 	borderStyle := ce.cachedStyles.border
-	if !ce.ReadOnly {
+	if ce.Focused || !ce.ReadOnly {
 		borderStyle = ce.cachedStyles.borderFocused
 	}
 

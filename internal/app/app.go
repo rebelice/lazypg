@@ -66,9 +66,8 @@ type App struct {
 	commandRegistry    *commands.Registry
 
 	// SQL Editor
-	sqlEditor        *components.SQLEditor
-	resultTabs       *components.ResultTabs
-	sqlEditorFocused bool // true when SQL editor has focus
+	sqlEditor  *components.SQLEditor
+	resultTabs *components.ResultTabs
 
 	// History
 	historyStore *history.Store
@@ -397,7 +396,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !a.sqlEditor.IsExpanded() {
 			a.sqlEditor.Expand()
 		}
-		a.sqlEditorFocused = true
+		a.state.FocusArea = models.FocusSQLEditor
+		a.updatePanelStyles()
 		return a, nil
 
 	case commands.QueryEditorCommandMsg:
@@ -476,8 +476,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Immediately switch focus to data panel and collapse editor
 		a.sqlEditor.Collapse()
-		a.sqlEditorFocused = false
-		a.state.FocusedPanel = models.RightPanel
+		a.state.FocusArea = models.FocusDataPanel
 		a.updatePanelStyles()
 
 		// Create cancellable context for query execution
@@ -799,34 +798,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.handleSearchInput(msg)
 		}
 
-		// Handle code editor input if visible (only in read-only mode)
-		// In edit mode, code editor captures all keys except global shortcuts
-		if a.showCodeEditor && a.codeEditor != nil {
-			// Allow Tab to switch focus without closing (in read-only mode)
-			if a.codeEditor.ReadOnly && msg.String() == "tab" {
-				// Toggle focus between panels
-				if a.state.FocusedPanel == models.RightPanel {
-					a.state.FocusedPanel = models.LeftPanel
-				} else {
-					a.state.FocusedPanel = models.RightPanel
-				}
-				a.updatePanelStyles()
-				return a, nil
-			}
-			// Only route to code editor when right panel is focused
-			if a.state.FocusedPanel == models.RightPanel {
+		// Handle code editor input if visible and DataPanel is focused
+		if a.showCodeEditor && a.codeEditor != nil && a.state.FocusArea == models.FocusDataPanel {
+			// Tab is handled in the unified Tab case below, skip here
+			if msg.String() != "tab" && msg.String() != "shift+tab" && msg.String() != "backtab" {
 				_, cmd := a.codeEditor.Update(msg)
 				return a, cmd
 			}
 		}
 
-		// If SQL editor is focused, route input there
-		if a.sqlEditorFocused {
+		// If SQL editor is focused and expanded, route input there
+		if a.isSQLEditorFocused() && a.sqlEditor.IsExpanded() {
 			// Handle escape to unfocus
 			if msg.String() == "esc" {
-				a.sqlEditorFocused = false
 				a.sqlEditor.Collapse()
-				a.state.FocusedPanel = models.RightPanel
+				a.state.FocusArea = models.FocusDataPanel
 				a.updatePanelStyles()
 				return a, nil
 			}
@@ -834,13 +820,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Handle ctrl+e to collapse
 			if msg.String() == "ctrl+e" {
 				a.sqlEditor.Collapse()
-				a.sqlEditorFocused = false
+				a.state.FocusArea = models.FocusDataPanel
+				a.updatePanelStyles()
 				return a, nil
 			}
 
-			// Route to SQL editor
-			_, cmd := a.sqlEditor.Update(msg)
-			return a, cmd
+			// Tab is handled in the unified Tab case below when not editing
+			if msg.String() == "tab" || msg.String() == "shift+tab" || msg.String() == "backtab" {
+				// Let Tab fall through to the switch case for focus cycling
+			} else {
+				// Route other keys to SQL editor
+				_, cmd := a.sqlEditor.Update(msg)
+				return a, cmd
+			}
 		}
 
 		switch msg.String() {
@@ -848,20 +840,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+e":
 			a.sqlEditor.Toggle()
 			if a.sqlEditor.IsExpanded() {
-				a.sqlEditorFocused = true
+				a.state.FocusArea = models.FocusSQLEditor
+				a.updatePanelStyles()
 			}
 			return a, nil
 
 		// Ctrl+Shift+Up to increase editor height preset
 		case "ctrl+shift+up":
-			if a.sqlEditorFocused && a.sqlEditor.IsExpanded() {
+			if a.isSQLEditorFocused() && a.sqlEditor.IsExpanded() {
 				a.sqlEditor.IncreaseHeight()
 			}
 			return a, nil
 
 		// Ctrl+Shift+Down to decrease editor height preset
 		case "ctrl+shift+down":
-			if a.sqlEditorFocused && a.sqlEditor.IsExpanded() {
+			if a.isSQLEditorFocused() && a.sqlEditor.IsExpanded() {
 				a.sqlEditor.DecreaseHeight()
 			}
 			return a, nil
@@ -869,7 +862,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Tab switching with [ and ] (like lazygit)
 		case "[":
 			// Previous result tab (when not in SQL editor)
-			if a.resultTabs.HasTabs() && !a.sqlEditorFocused {
+			if a.resultTabs.HasTabs() && !a.isSQLEditorFocused() {
 				a.resultTabs.PrevTab()
 				// Sync SQL editor content with the active tab's SQL
 				if sql := a.resultTabs.GetActiveSQL(); sql != "" {
@@ -886,7 +879,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "]":
 			// Next result tab (when not in SQL editor)
-			if a.resultTabs.HasTabs() && !a.sqlEditorFocused {
+			if a.resultTabs.HasTabs() && !a.isSQLEditorFocused() {
 				a.resultTabs.NextTab()
 				// Sync SQL editor content with the active tab's SQL
 				if sql := a.resultTabs.GetActiveSQL(); sql != "" {
@@ -906,7 +899,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !a.sqlEditor.IsExpanded() {
 				a.sqlEditor.Expand()
 			}
-			a.sqlEditorFocused = true
+			a.state.FocusArea = models.FocusSQLEditor
+			a.updatePanelStyles()
 			return a, nil
 		case "ctrl+k":
 			// Open unified command palette
@@ -955,7 +949,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, a.triggerDiscovery()
 		case "f":
 			// Open filter builder if on table view
-			if a.state.FocusedPanel == models.RightPanel && a.state.TreeSelected != nil {
+			if a.state.FocusArea == models.FocusDataPanel && a.state.TreeSelected != nil {
 				if a.state.TreeSelected.Type == models.TreeNodeTypeTable {
 					// Get column info from current table
 					columns := a.getTableColumns()
@@ -971,7 +965,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		case "ctrl+f":
 			// Quick filter from current cell
-			if a.state.FocusedPanel == models.RightPanel && a.tableView != nil {
+			if a.state.FocusArea == models.FocusDataPanel && a.tableView != nil {
 				selectedRow, selectedCol := a.tableView.GetSelectedCell()
 				if selectedRow >= 0 && selectedCol >= 0 && selectedCol < len(a.tableView.Columns) {
 					// Get column name and value
@@ -1071,33 +1065,35 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "tab":
 			// Only handle tab in normal mode
 			if a.state.ViewMode == models.NormalMode {
-				if a.sqlEditorFocused {
-					// From SQL editor to sidebar
-					a.sqlEditorFocused = false
-					a.state.FocusedPanel = models.LeftPanel
-				} else if a.state.FocusedPanel == models.LeftPanel {
-					// From sidebar to data panel
-					a.state.FocusedPanel = models.RightPanel
-				} else {
-					// From data panel to SQL editor (if expanded) or sidebar
-					if a.sqlEditor.IsExpanded() {
-						a.sqlEditorFocused = true
-					} else {
-						a.state.FocusedPanel = models.LeftPanel
+				if a.isEditingText() {
+					// In edit mode, Tab inserts indentation
+					if a.showCodeEditor && a.codeEditor != nil && !a.codeEditor.ReadOnly {
+						a.codeEditor.Update(msg)
+					} else if a.isSQLEditorFocused() && a.sqlEditor.IsExpanded() {
+						a.sqlEditor.Update(msg)
 					}
+				} else {
+					// Normal mode: cycle focus TreeView -> DataPanel -> SQLEditor -> TreeView
+					a.nextFocus()
 				}
-				a.updatePanelStyles()
+				return a, nil
+			}
+		case "shift+tab", "backtab":
+			// Reverse focus cycle (only when not editing)
+			if a.state.ViewMode == models.NormalMode && !a.isEditingText() {
+				a.prevFocus()
+				return a, nil
 			}
 		default:
-			// Handle tree navigation when left panel is focused
-			if a.state.FocusedPanel == models.LeftPanel && a.state.ViewMode == models.NormalMode {
+			// Handle tree navigation when TreeView is focused
+			if a.state.FocusArea == models.FocusTreeView && a.state.ViewMode == models.NormalMode {
 				var cmd tea.Cmd
 				a.treeView, cmd = a.treeView.Update(msg)
 				return a, cmd
 			}
 
-			// Handle table navigation when right panel is focused
-			if a.state.FocusedPanel == models.RightPanel && a.state.ViewMode == models.NormalMode {
+			// Handle table navigation when DataPanel is focused
+			if a.state.FocusArea == models.FocusDataPanel && a.state.ViewMode == models.NormalMode {
 				// Get the active table view (Result Tabs, Structure View, or main TableView)
 				activeTable := a.getActiveTableView()
 
@@ -1470,7 +1466,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.codeEditor.SetContent(msg.Content, msg.ObjectType, msg.Title)
 		a.codeEditor.ObjectName = msg.ObjectName
 		a.showCodeEditor = true
-		a.state.FocusedPanel = models.RightPanel
+		a.state.FocusArea = models.FocusDataPanel
 		a.updatePanelStyles()
 		return a, nil
 
@@ -1478,7 +1474,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Close the code editor and return to tree navigation
 		a.showCodeEditor = false
 		a.codeEditor = nil
-		a.state.FocusedPanel = models.LeftPanel
+		a.state.FocusArea = models.FocusTreeView
 		a.updatePanelStyles()
 		return a, nil
 
@@ -1519,7 +1515,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.tableView.SetData(msg.Columns, msg.Rows, msg.TotalRows)
 			a.tableView.SelectedRow = 0
 			a.tableView.TopRow = 0
-			a.state.FocusedPanel = models.RightPanel
+			a.state.FocusArea = models.FocusDataPanel
 			a.updatePanelStyles()
 		} else {
 			// Append paginated data (same table, loading more rows)
@@ -1651,23 +1647,36 @@ func (a *App) renderNormalView() string {
 
 	// Context-sensitive bottom bar with cached styles
 	var bottomBarLeft string
-	if a.sqlEditorFocused {
+	// Focus area label style
+	focusLabelStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#1e1e2e")). // Dark text
+		Background(lipgloss.Color("#89b4fa")). // Blue background
+		Padding(0, 1).
+		Bold(true)
+
+	if a.isSQLEditorFocused() {
 		// SQL editor mode
-		bottomBarLeft = styles.keyStyle.Render("Ctrl+S") + styles.dimStyle.Render(" execute") +
+		focusLabel := focusLabelStyle.Render("SQL")
+		bottomBarLeft = focusLabel + styles.separatorStyle.Render(" │ ") +
+			styles.keyStyle.Render("Ctrl+S") + styles.dimStyle.Render(" execute") +
 			styles.separatorStyle.Render(" │ ") +
 			styles.keyStyle.Render("Ctrl+O") + styles.dimStyle.Render(" editor") +
 			styles.separatorStyle.Render(" │ ") +
 			styles.keyStyle.Render("Esc") + styles.dimStyle.Render(" close")
-	} else if a.state.FocusedPanel == models.LeftPanel {
+	} else if a.state.FocusArea == models.FocusTreeView {
 		// Tree navigation keys with icons
-		bottomBarLeft = styles.keyStyle.Render("↑↓") + styles.dimStyle.Render(" navigate") +
+		focusLabel := focusLabelStyle.Render("Tree")
+		bottomBarLeft = focusLabel + styles.separatorStyle.Render(" │ ") +
+			styles.keyStyle.Render("↑↓") + styles.dimStyle.Render(" navigate") +
 			styles.separatorStyle.Render(" │ ") +
 			styles.keyStyle.Render("→←") + styles.dimStyle.Render(" expand") +
 			styles.separatorStyle.Render(" │ ") +
 			styles.keyStyle.Render("Enter") + styles.dimStyle.Render(" select")
 	} else {
 		// Data panel - include SQL editor shortcut
-		bottomBarLeft = styles.keyStyle.Render("↑↓") + styles.dimStyle.Render(" navigate") +
+		focusLabel := focusLabelStyle.Render("Data")
+		bottomBarLeft = focusLabel + styles.separatorStyle.Render(" │ ") +
+			styles.keyStyle.Render("↑↓") + styles.dimStyle.Render(" navigate") +
 			styles.separatorStyle.Render(" │ ") +
 			styles.keyStyle.Render("Ctrl+D/U") + styles.dimStyle.Render(" page") +
 			styles.separatorStyle.Render(" │ ") +
@@ -1689,7 +1698,7 @@ func (a *App) renderNormalView() string {
 	}
 
 	// Add Vim motion status if pending
-	if a.state.FocusedPanel == models.RightPanel && a.currentTab == 0 {
+	if a.state.FocusArea == models.FocusDataPanel && a.currentTab == 0 {
 		vimStatus := a.tableView.GetVimMotionStatus()
 		if vimStatus != "" {
 			bottomBarLeft = bottomBarLeft + styles.separatorStyle.Render(" │ ") + styles.vimStyle.Render(vimStatus)
@@ -2061,25 +2070,91 @@ func (a *App) updatePanelDimensions() {
 
 // updatePanelStyles updates panel styling based on focus with Catppuccin colors
 func (a *App) updatePanelStyles() {
-	if a.state.FocusedPanel == models.LeftPanel {
-		// Focused left panel - Blue border, transparent background like connection dialog
+	// Update legacy FocusedPanel for compatibility
+	if a.state.FocusArea == models.FocusTreeView {
+		a.state.FocusedPanel = models.LeftPanel
+	} else {
+		a.state.FocusedPanel = models.RightPanel
+	}
+
+	// Left panel style
+	if a.state.FocusArea == models.FocusTreeView {
 		a.leftPanel.Style = lipgloss.NewStyle().
-			BorderForeground(lipgloss.Color("#89b4fa")). // Blue
-			Foreground(lipgloss.Color("#cdd6f4"))         // Text
-		// Unfocused right panel - Surface border
-		a.rightPanel.Style = lipgloss.NewStyle().
-			BorderForeground(lipgloss.Color("#45475a")). // Surface1
+			BorderForeground(lipgloss.Color("#89b4fa")). // Blue - focused
 			Foreground(lipgloss.Color("#cdd6f4"))        // Text
 	} else {
-		// Unfocused left panel
 		a.leftPanel.Style = lipgloss.NewStyle().
-			BorderForeground(lipgloss.Color("#45475a")). // Surface1
-			Foreground(lipgloss.Color("#cdd6f4"))        // Text
-		// Focused right panel - Blue border
-		a.rightPanel.Style = lipgloss.NewStyle().
-			BorderForeground(lipgloss.Color("#89b4fa")). // Blue
+			BorderForeground(lipgloss.Color("#45475a")). // Surface1 - unfocused
 			Foreground(lipgloss.Color("#cdd6f4"))        // Text
 	}
+
+	// Right panel style (focused when DataPanel or SQLEditor)
+	if a.state.FocusArea == models.FocusDataPanel || a.state.FocusArea == models.FocusSQLEditor {
+		a.rightPanel.Style = lipgloss.NewStyle().
+			BorderForeground(lipgloss.Color("#89b4fa")). // Blue - focused
+			Foreground(lipgloss.Color("#cdd6f4"))        // Text
+	} else {
+		a.rightPanel.Style = lipgloss.NewStyle().
+			BorderForeground(lipgloss.Color("#45475a")). // Surface1 - unfocused
+			Foreground(lipgloss.Color("#cdd6f4"))        // Text
+	}
+
+	// Update SQL Editor focused state
+	a.sqlEditor.Focused = (a.state.FocusArea == models.FocusSQLEditor)
+
+	// Update Code Editor focused state
+	if a.codeEditor != nil {
+		a.codeEditor.Focused = (a.state.FocusArea == models.FocusDataPanel)
+	}
+
+	// Update TableView focused state
+	// DataPanel is focused and CodeEditor is not shown
+	isTableFocused := a.state.FocusArea == models.FocusDataPanel && !a.showCodeEditor
+	a.tableView.Focused = isTableFocused
+}
+
+// nextFocus moves focus to the next region in cycle: TreeView -> DataPanel -> SQLEditor -> TreeView
+func (a *App) nextFocus() {
+	switch a.state.FocusArea {
+	case models.FocusTreeView:
+		a.state.FocusArea = models.FocusDataPanel
+	case models.FocusDataPanel:
+		a.state.FocusArea = models.FocusSQLEditor
+	case models.FocusSQLEditor:
+		a.state.FocusArea = models.FocusTreeView
+	}
+	a.updatePanelStyles()
+}
+
+// prevFocus moves focus to the previous region in cycle
+func (a *App) prevFocus() {
+	switch a.state.FocusArea {
+	case models.FocusTreeView:
+		a.state.FocusArea = models.FocusSQLEditor
+	case models.FocusDataPanel:
+		a.state.FocusArea = models.FocusTreeView
+	case models.FocusSQLEditor:
+		a.state.FocusArea = models.FocusDataPanel
+	}
+	a.updatePanelStyles()
+}
+
+// isEditingText returns true if user is actively editing text (Tab should insert indent)
+func (a *App) isEditingText() bool {
+	// CodeEditor in edit mode
+	if a.state.FocusArea == models.FocusDataPanel && a.showCodeEditor && a.codeEditor != nil && !a.codeEditor.ReadOnly {
+		return true
+	}
+	// SQLEditor expanded and focused
+	if a.state.FocusArea == models.FocusSQLEditor && a.sqlEditor.IsExpanded() {
+		return true
+	}
+	return false
+}
+
+// isSQLEditorFocused returns true if SQL editor has focus (compatibility helper)
+func (a *App) isSQLEditorFocused() bool {
+	return a.state.FocusArea == models.FocusSQLEditor
 }
 
 // handleMouseEvent processes mouse events for scrolling and clicking using bubblezone
@@ -2306,8 +2381,7 @@ func (a *App) handleMouseEvent(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		for i := 0; i < 100; i++ {
 			zoneID := fmt.Sprintf("%s%d", components.ZoneTreeRowPrefix, i)
 			if zone.Get(zoneID).InBounds(msg) {
-				a.state.FocusedPanel = models.LeftPanel
-				a.sqlEditorFocused = false
+				a.state.FocusArea = models.FocusTreeView
 				a.updatePanelStyles()
 				_, cmd := a.treeView.HandleClick(i)
 				return a, cmd
@@ -2319,8 +2393,7 @@ func (a *App) handleMouseEvent(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			for col := 0; col < 50; col++ {
 				zoneID := fmt.Sprintf("%s%d-%d", components.ZoneTableCellPrefix, row, col)
 				if zone.Get(zoneID).InBounds(msg) {
-					a.state.FocusedPanel = models.RightPanel
-					a.sqlEditorFocused = false
+					a.state.FocusArea = models.FocusDataPanel
 					a.updatePanelStyles()
 					if activeTable := a.getActiveTableView(); activeTable != nil {
 						// Convert visible col index to actual col index
@@ -2357,8 +2430,7 @@ func (a *App) handleMouseEvent(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		for i := 0; i < 100; i++ {
 			zoneID := fmt.Sprintf("%s%d", components.ZoneTableRowPrefix, i)
 			if zone.Get(zoneID).InBounds(msg) {
-				a.state.FocusedPanel = models.RightPanel
-				a.sqlEditorFocused = false
+				a.state.FocusArea = models.FocusDataPanel
 				a.updatePanelStyles()
 				if activeTable := a.getActiveTableView(); activeTable != nil {
 					activeTable.SetSelectedRow(activeTable.TopRow + i)
@@ -2369,8 +2441,7 @@ func (a *App) handleMouseEvent(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 		// Check SQL editor
 		if zone.Get(components.ZoneSQLEditor).InBounds(msg) {
-			a.sqlEditorFocused = true
-			a.state.FocusedPanel = models.RightPanel
+			a.state.FocusArea = models.FocusSQLEditor
 			a.updatePanelStyles()
 
 			// Expand editor if collapsed

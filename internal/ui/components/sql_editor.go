@@ -42,9 +42,9 @@ type ExternalEditorResultMsg struct {
 // SQLEditor is a multiline SQL editor component
 type SQLEditor struct {
 	// Content
-	lines      []string // Lines of text
-	cursorRow  int      // Current cursor row (0-indexed)
-	cursorCol  int      // Current cursor column (0-indexed)
+	lines     []string // Lines of text
+	cursorRow int      // Current cursor row (0-indexed)
+	cursorCol int      // Current cursor column (0-indexed)
 
 	// Dimensions
 	Width  int
@@ -53,6 +53,7 @@ type SQLEditor struct {
 	// State
 	expanded     bool
 	heightPreset SQLEditorHeightPreset
+	Focused      bool // Whether the editor has focus
 
 	// Theme
 	Theme theme.Theme
@@ -479,8 +480,9 @@ func (e *SQLEditor) View() string {
 	content := strings.Join(visibleLines, "\n")
 
 	// Container style - define first
+	// Use focused border color when focused (even if collapsed)
 	borderColor := e.Theme.Border
-	if e.expanded {
+	if e.Focused || e.expanded {
 		borderColor = e.Theme.BorderFocused
 	}
 
@@ -617,6 +619,11 @@ func (e *SQLEditor) Update(msg tea.KeyMsg) (*SQLEditor, tea.Cmd) {
 		e.DeleteCharAfter()
 	case "enter":
 		e.InsertNewline()
+	case "tab":
+		// Insert 4 spaces for tab
+		for i := 0; i < 4; i++ {
+			e.InsertChar(' ')
+		}
 	case "ctrl+u":
 		e.Clear()
 

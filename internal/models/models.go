@@ -5,7 +5,8 @@ type AppState struct {
 	Width          int
 	Height         int
 	LeftPanelWidth int
-	FocusedPanel   PanelType
+	FocusedPanel   PanelType // Deprecated: use FocusArea instead
+	FocusArea      FocusArea // Current focus region
 	ViewMode       ViewMode
 
 	// Connection state (Phase 2)
@@ -22,12 +23,21 @@ type AppState struct {
 	TreeVisibleNodes []*TreeNode // Cached flat list of visible nodes
 }
 
-// PanelType identifies which panel is focused
+// PanelType identifies which panel is focused (legacy, use FocusArea instead)
 type PanelType int
 
 const (
 	LeftPanel PanelType = iota
 	RightPanel
+)
+
+// FocusArea identifies which region has focus
+type FocusArea int
+
+const (
+	FocusTreeView  FocusArea = iota // Left sidebar - tree navigation
+	FocusDataPanel                  // Right content area - DataView/CodeEditor/StructureView
+	FocusSQLEditor                  // Bottom SQL editor
 )
 
 // ViewMode identifies the current view
@@ -44,7 +54,8 @@ func NewAppState() AppState {
 		Width:          80,
 		Height:         24,
 		LeftPanelWidth: 25,
-		FocusedPanel:   LeftPanel,
+		FocusedPanel:   LeftPanel,  // Deprecated
+		FocusArea:      FocusTreeView,
 		ViewMode:       NormalMode,
 	}
 }
