@@ -1060,7 +1060,13 @@ func (tv *TreeView) GetSearchStatus() string {
 func (tv *TreeView) getSearchBarHeight() int {
 	switch tv.SearchState {
 	case SearchInputting, SearchFilterActive:
-		return 4 // border(1) + search input + hints + border(1)
+		// Render the search bar and measure its actual height
+		searchBarLines := tv.renderSearchBar()
+		if len(searchBarLines) == 0 {
+			return 0
+		}
+		// Use lipgloss.Height to measure the rendered content
+		return lipgloss.Height(searchBarLines[0])
 	default:
 		return 0
 	}

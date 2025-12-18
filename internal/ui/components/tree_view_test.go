@@ -662,23 +662,24 @@ func TestTreeView_SearchBarHeight(t *testing.T) {
 	root := createTestTreeForView()
 	testTheme := theme.DefaultTheme()
 	tv := NewTreeView(root, testTheme)
+	tv.Width = 80 // Set width for dynamic height calculation
 
 	// No search - height should be 0
 	if height := tv.getSearchBarHeight(); height != 0 {
 		t.Errorf("expected height 0 when search off, got %d", height)
 	}
 
-	// Search inputting - height should be 4 (border + input + hints + border)
+	// Search inputting - height should be at least 4 (border + input + hints + border)
 	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
-	if height := tv.getSearchBarHeight(); height != 4 {
-		t.Errorf("expected height 4 when inputting, got %d", height)
+	if height := tv.getSearchBarHeight(); height < 4 {
+		t.Errorf("expected height >= 4 when inputting, got %d", height)
 	}
 
-	// Search filter active - height should be 4 (same box with different hints)
+	// Search filter active - height should be at least 4 (same box with different hints)
 	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
 	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if height := tv.getSearchBarHeight(); height != 4 {
-		t.Errorf("expected height 4 when filter active, got %d", height)
+	if height := tv.getSearchBarHeight(); height < 4 {
+		t.Errorf("expected height >= 4 when filter active, got %d", height)
 	}
 }
 
