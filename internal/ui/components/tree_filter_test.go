@@ -2,6 +2,7 @@
 package components
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/rebelice/lazypg/internal/models"
@@ -164,5 +165,93 @@ func TestNodeMatchesType_Schema(t *testing.T) {
 
 	if !NodeMatchesType(node, "schema") {
 		t.Error("schema node should match 'schema' type filter")
+	}
+}
+
+func createTestTree() *models.TreeNode {
+	root := models.NewTreeNode("root", models.TreeNodeTypeRoot, "Root")
+	root.Expanded = true
+
+	db := models.NewTreeNode("db:test", models.TreeNodeTypeDatabase, "test")
+	db.Expanded = true
+	root.AddChild(db)
+
+	schema := models.NewTreeNode("schema:test.public", models.TreeNodeTypeSchema, "public")
+	schema.Expanded = true
+	db.AddChild(schema)
+
+	tables := models.NewTreeNode("tables", models.TreeNodeTypeTableGroup, "Tables")
+	tables.Expanded = true
+	schema.AddChild(tables)
+
+	// Add test tables
+	plan := models.NewTreeNode("table:test.public.plan", models.TreeNodeTypeTable, "plan")
+	planCheck := models.NewTreeNode("table:test.public.plan_check_run", models.TreeNodeTypeTable, "plan_check_run")
+	users := models.NewTreeNode("table:test.public.users", models.TreeNodeTypeTable, "users")
+	tables.AddChild(plan)
+	tables.AddChild(planCheck)
+	tables.AddChild(users)
+
+	funcs := models.NewTreeNode("funcs", models.TreeNodeTypeFunctionGroup, "Functions")
+	funcs.Expanded = true
+	schema.AddChild(funcs)
+
+	getUser := models.NewTreeNode("func:test.public.get_user", models.TreeNodeTypeFunction, "get_user")
+	funcs.AddChild(getUser)
+
+	return root
+}
+
+func TestFilterTree_SimpleMatch(t *testing.T) {
+	root := createTestTree()
+	query := ParseSearchQuery("plan")
+
+	matches := FilterTree(root, query)
+
+	if len(matches) != 2 {
+		t.Errorf("expected 2 matches (plan, plan_check_run), got %d", len(matches))
+	}
+}
+
+func TestFilterTree_TypeFilter(t *testing.T) {
+	root := createTestTree()
+	query := ParseSearchQuery("t:plan")
+
+	matches := FilterTree(root, query)
+
+	// Should only match tables containing "plan"
+	if len(matches) != 2 {
+		t.Errorf("expected 2 table matches, got %d", len(matches))
+	}
+	for _, m := range matches {
+		if m.Type != models.TreeNodeTypeTable {
+			t.Errorf("expected only table nodes, got %s", m.Type)
+		}
+	}
+}
+
+func TestFilterTree_Negate(t *testing.T) {
+	root := createTestTree()
+	query := ParseSearchQuery("!plan")
+
+	matches := FilterTree(root, query)
+
+	// Should match users, get_user, and public schema (not plan or plan_check_run)
+	for _, m := range matches {
+		if strings.Contains(strings.ToLower(m.Label), "plan") {
+			t.Errorf("negated query should not match '%s'", m.Label)
+		}
+	}
+}
+
+func TestFilterTree_EmptyQuery(t *testing.T) {
+	root := createTestTree()
+	query := ParseSearchQuery("")
+
+	matches := FilterTree(root, query)
+
+	// Empty query should return all searchable nodes
+	if len(matches) == 0 {
+		t.Error("empty query should return all searchable nodes")
 	}
 }

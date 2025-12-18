@@ -124,3 +124,84 @@ func NodeMatchesType(node *models.TreeNode, typeFilter string) bool {
 	}
 	return false
 }
+
+// isSearchableNode returns true if this node type should be included in search results
+func isSearchableNode(node *models.TreeNode) bool {
+	switch node.Type {
+	case models.TreeNodeTypeTable,
+		models.TreeNodeTypeView,
+		models.TreeNodeTypeMaterializedView,
+		models.TreeNodeTypeFunction,
+		models.TreeNodeTypeProcedure,
+		models.TreeNodeTypeTriggerFunction,
+		models.TreeNodeTypeSequence,
+		models.TreeNodeTypeIndex,
+		models.TreeNodeTypeTrigger,
+		models.TreeNodeTypeExtension,
+		models.TreeNodeTypeCompositeType,
+		models.TreeNodeTypeEnumType,
+		models.TreeNodeTypeDomainType,
+		models.TreeNodeTypeRangeType,
+		models.TreeNodeTypeSchema,
+		models.TreeNodeTypeColumn:
+		return true
+	default:
+		return false
+	}
+}
+
+// FilterTree filters the tree based on search query
+// Returns a flat list of matching nodes
+func FilterTree(root *models.TreeNode, query SearchQuery) []*models.TreeNode {
+	var matches []*models.TreeNode
+
+	var traverse func(node *models.TreeNode)
+	traverse = func(node *models.TreeNode) {
+		if node == nil {
+			return
+		}
+
+		// Check if this node should be considered for matching
+		if isSearchableNode(node) {
+			// Check type filter first
+			typeMatches := NodeMatchesType(node, query.TypeFilter)
+
+			// Check pattern match
+			patternMatches := true
+			if query.Pattern != "" {
+				patternMatches, _ = FuzzyMatch(query.Pattern, node.Label)
+			}
+
+			// Apply negation logic
+			shouldInclude := false
+			if query.Negate {
+				// Include if it does NOT match (type or pattern)
+				if query.TypeFilter != "" && !typeMatches {
+					// Type doesn't match the filter, include it
+					shouldInclude = true
+				} else if typeMatches && !patternMatches {
+					// Type matches but pattern doesn't, include it
+					shouldInclude = true
+				} else if query.TypeFilter == "" && !patternMatches {
+					// No type filter, pattern doesn't match, include it
+					shouldInclude = true
+				}
+			} else {
+				// Normal match: include if type and pattern both match
+				shouldInclude = typeMatches && patternMatches
+			}
+
+			if shouldInclude {
+				matches = append(matches, node)
+			}
+		}
+
+		// Always traverse children
+		for _, child := range node.Children {
+			traverse(child)
+		}
+	}
+
+	traverse(root)
+	return matches
+}

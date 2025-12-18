@@ -529,3 +529,251 @@ func TestTreeView_ViKeybindings(t *testing.T) {
 		t.Error("Expected node to be collapsed after 'h'")
 	}
 }
+
+func TestTreeView_SearchActivation(t *testing.T) {
+	root := createTestTreeForView()
+	testTheme := theme.DefaultTheme()
+	tv := NewTreeView(root, testTheme)
+
+	// Press / to start search
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+
+	if tv.SearchState != SearchInputting {
+		t.Errorf("expected SearchInputting state, got %d", tv.SearchState)
+	}
+}
+
+func TestTreeView_SearchTyping(t *testing.T) {
+	root := createTestTreeForView()
+	testTheme := theme.DefaultTheme()
+	tv := NewTreeView(root, testTheme)
+
+	// Start search and type
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+
+	if tv.SearchQuery != "plan" {
+		t.Errorf("expected query 'plan', got '%s'", tv.SearchQuery)
+	}
+}
+
+func TestTreeView_SearchEscDuringInputClears(t *testing.T) {
+	root := createTestTreeForView()
+	testTheme := theme.DefaultTheme()
+	tv := NewTreeView(root, testTheme)
+
+	// Start search, type, then Esc during input - should clear everything
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+	if tv.SearchState != SearchOff {
+		t.Errorf("expected SearchOff after Esc during input, got %d", tv.SearchState)
+	}
+	if tv.SearchQuery != "" {
+		t.Errorf("expected query cleared, got '%s'", tv.SearchQuery)
+	}
+	if tv.FilteredNodes != nil {
+		t.Error("expected FilteredNodes to be nil after Esc")
+	}
+}
+
+func TestTreeView_SearchEnterConfirms(t *testing.T) {
+	root := createTestTreeForView()
+	testTheme := theme.DefaultTheme()
+	tv := NewTreeView(root, testTheme)
+
+	// Start search, type, then Enter - should confirm and enter filter active mode
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if tv.SearchState != SearchFilterActive {
+		t.Errorf("expected SearchFilterActive after Enter, got %d", tv.SearchState)
+	}
+	if tv.SearchQuery != "p" {
+		t.Errorf("expected query preserved after Enter, got '%s'", tv.SearchQuery)
+	}
+	if tv.FilteredNodes == nil {
+		t.Error("expected FilteredNodes to be preserved after Enter")
+	}
+}
+
+func TestTreeView_SearchEscAfterEnterClears(t *testing.T) {
+	root := createTestTreeForView()
+	testTheme := theme.DefaultTheme()
+	tv := NewTreeView(root, testTheme)
+
+	// Start search, type, Enter to confirm, then Esc to clear
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+	if tv.SearchState != SearchOff {
+		t.Errorf("expected SearchOff after Esc in filter active mode, got %d", tv.SearchState)
+	}
+	if tv.SearchQuery != "" {
+		t.Errorf("expected query cleared, got '%s'", tv.SearchQuery)
+	}
+	if tv.FilteredNodes != nil {
+		t.Error("expected FilteredNodes to be nil")
+	}
+}
+
+// Helper to create test tree
+func createTestTreeForView() *models.TreeNode {
+	root := models.NewTreeNode("root", models.TreeNodeTypeRoot, "Root")
+	root.Expanded = true
+	root.Loaded = true
+
+	db := models.NewTreeNode("db:test", models.TreeNodeTypeDatabase, "test")
+	db.Expanded = true
+	db.Loaded = true
+	root.AddChild(db)
+
+	schema := models.NewTreeNode("schema:test.public", models.TreeNodeTypeSchema, "public")
+	schema.Expanded = true
+	schema.Loaded = true
+	db.AddChild(schema)
+
+	tables := models.NewTreeNode("tables", models.TreeNodeTypeTableGroup, "Tables (3)")
+	tables.Expanded = true
+	tables.Loaded = true
+	schema.AddChild(tables)
+
+	plan := models.NewTreeNode("table:test.public.plan", models.TreeNodeTypeTable, "plan")
+	planCheck := models.NewTreeNode("table:test.public.plan_check_run", models.TreeNodeTypeTable, "plan_check_run")
+	users := models.NewTreeNode("table:test.public.users", models.TreeNodeTypeTable, "users")
+	plan.Loaded = true
+	planCheck.Loaded = true
+	users.Loaded = true
+	tables.AddChild(plan)
+	tables.AddChild(planCheck)
+	tables.AddChild(users)
+
+	return root
+}
+
+func TestTreeView_SearchBarHeight(t *testing.T) {
+	root := createTestTreeForView()
+	testTheme := theme.DefaultTheme()
+	tv := NewTreeView(root, testTheme)
+
+	// No search - height should be 0
+	if height := tv.getSearchBarHeight(); height != 0 {
+		t.Errorf("expected height 0 when search off, got %d", height)
+	}
+
+	// Search inputting - height should be 4 (border + input + hints + border)
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	if height := tv.getSearchBarHeight(); height != 4 {
+		t.Errorf("expected height 4 when inputting, got %d", height)
+	}
+
+	// Search filter active - height should be 4 (same box with different hints)
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if height := tv.getSearchBarHeight(); height != 4 {
+		t.Errorf("expected height 4 when filter active, got %d", height)
+	}
+}
+
+func TestTreeView_SearchBarRendering(t *testing.T) {
+	root := createTestTreeForView()
+	testTheme := theme.DefaultTheme()
+	tv := NewTreeView(root, testTheme)
+	tv.Width = 40
+	tv.Height = 20
+
+	// Start search
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+
+	view := tv.View()
+	// Should contain separator line
+	if !strings.Contains(view, "─") {
+		t.Error("expected separator line in view")
+	}
+	// Should contain search icon
+	if !strings.Contains(view, "🔍") {
+		t.Error("expected search icon in view")
+	}
+	// Should contain syntax hints
+	if !strings.Contains(view, "t:") {
+		t.Error("expected type hint 't:' in view")
+	}
+}
+
+func TestTreeView_TypeTagRendering(t *testing.T) {
+	root := createTestTreeForView()
+	testTheme := theme.DefaultTheme()
+	tv := NewTreeView(root, testTheme)
+	tv.Width = 40
+	tv.Height = 20
+
+	// Type "t:plan" to filter by table
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{':'}})
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+
+	view := tv.View()
+	// Should contain Table tag
+	if !strings.Contains(view, "Table") {
+		t.Error("expected 'Table' tag in view when using t: prefix")
+	}
+	// Should contain table icon
+	if !strings.Contains(view, "▦") {
+		t.Error("expected table icon '▦' in view")
+	}
+}
+
+func TestTreeView_MatchHighlighting(t *testing.T) {
+	root := createTestTreeForView()
+	testTheme := theme.DefaultTheme()
+	tv := NewTreeView(root, testTheme)
+	tv.Width = 40
+	tv.Height = 20
+
+	// Search for "plan"
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+
+	// Verify match positions are stored
+	if len(tv.MatchPositions) == 0 {
+		t.Error("expected match positions to be populated")
+	}
+
+	// Verify filtered results have positions
+	for _, node := range tv.FilteredNodes {
+		if strings.Contains(node.Label, "plan") {
+			if positions, ok := tv.MatchPositions[node]; !ok || len(positions) == 0 {
+				t.Errorf("expected match positions for node '%s'", node.Label)
+			}
+		}
+	}
+}
+
+func TestTreeView_SchemaPathInFilterMode(t *testing.T) {
+	root := createTestTreeForView()
+	testTheme := theme.DefaultTheme()
+	tv := NewTreeView(root, testTheme)
+	tv.Width = 60
+	tv.Height = 20
+
+	// Search for "plan"
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	tv, _ = tv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+
+	view := tv.View()
+	// Should contain schema name in parentheses
+	if !strings.Contains(view, "(public)") {
+		t.Error("expected schema path '(public)' in filter results")
+	}
+}

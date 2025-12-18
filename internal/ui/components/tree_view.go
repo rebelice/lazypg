@@ -42,6 +42,15 @@ const (
 	ZoneTreeRowPrefix = "tree-row-"
 )
 
+// SearchModeState represents the current search state
+type SearchModeState int
+
+const (
+	SearchOff          SearchModeState = iota // No search active
+	SearchInputting                           // User is typing search query (Enter to confirm, Esc to cancel)
+	SearchFilterActive                        // Filter confirmed (Enter pressed), Esc to clear filter
+)
+
 // TreeView represents a visual tree component for displaying hierarchical data
 type TreeView struct {
 	Root         *models.TreeNode // Root node of the tree
@@ -52,9 +61,10 @@ type TreeView struct {
 	ScrollOffset int              // Vertical scroll offset for viewport
 
 	// Search/filter state
-	SearchMode   bool   // Whether search mode is active
-	SearchQuery  string // Current search query
-	FilterActive bool   // Whether filter is applied to tree
+	SearchState    SearchModeState            // Current search state
+	SearchQuery    string                     // Current search query text
+	FilteredNodes  []*models.TreeNode         // Flat list of nodes matching filter
+	MatchPositions map[*models.TreeNode][]int // Match positions for highlighting
 }
 
 // TreeNodeSelectedMsg is sent when a node is selected (Enter key)
@@ -80,6 +90,84 @@ func NewTreeView(root *models.TreeNode, theme theme.Theme) *TreeView {
 	}
 }
 
+// getVisibleNodes returns the appropriate node list based on search state
+func (tv *TreeView) getVisibleNodes() []*models.TreeNode {
+	// Show filtered nodes when in filter active mode or inputting with filter
+	if (tv.SearchState == SearchFilterActive || tv.SearchState == SearchInputting) && tv.FilteredNodes != nil {
+		return tv.FilteredNodes
+	}
+	if tv.Root == nil {
+		return nil
+	}
+	return tv.Root.Flatten()
+}
+
+// handleSearchInput handles key input during search mode
+func (tv *TreeView) handleSearchInput(msg tea.KeyMsg) (*TreeView, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		// Esc during input: clear all search content and effects
+		tv.SearchState = SearchOff
+		tv.SearchQuery = ""
+		tv.FilteredNodes = nil
+		tv.MatchPositions = nil
+		tv.CursorIndex = 0
+		tv.ScrollOffset = 0
+		return tv, nil
+
+	case tea.KeyEnter:
+		// Enter: confirm search, move to filter active mode
+		if tv.SearchQuery != "" {
+			tv.SearchState = SearchFilterActive
+			tv.CursorIndex = 0
+			tv.ScrollOffset = 0
+		} else {
+			tv.SearchState = SearchOff
+		}
+		return tv, nil
+
+	case tea.KeyBackspace:
+		if len(tv.SearchQuery) > 0 {
+			tv.SearchQuery = tv.SearchQuery[:len(tv.SearchQuery)-1]
+			tv.applyFilter()
+		}
+		return tv, nil
+
+	case tea.KeyRunes:
+		tv.SearchQuery += string(msg.Runes)
+		tv.applyFilter()
+		return tv, nil
+	}
+
+	return tv, nil
+}
+
+// applyFilter applies the current search query to filter the tree
+func (tv *TreeView) applyFilter() {
+	if tv.SearchQuery == "" {
+		tv.FilteredNodes = nil
+		tv.MatchPositions = nil
+		return
+	}
+
+	query := ParseSearchQuery(tv.SearchQuery)
+	tv.FilteredNodes = FilterTree(tv.Root, query)
+
+	// Build match positions for highlighting
+	tv.MatchPositions = make(map[*models.TreeNode][]int)
+	for _, node := range tv.FilteredNodes {
+		if query.Pattern != "" && !query.Negate {
+			_, positions := FuzzyMatch(query.Pattern, node.Label)
+			tv.MatchPositions[node] = positions
+		}
+	}
+
+	// Reset cursor if out of bounds
+	if len(tv.FilteredNodes) > 0 && tv.CursorIndex >= len(tv.FilteredNodes) {
+		tv.CursorIndex = 0
+	}
+}
+
 // View renders the tree as a string
 func (tv *TreeView) View() string {
 	if tv.Root == nil {
@@ -87,9 +175,38 @@ func (tv *TreeView) View() string {
 	}
 
 	// Get flattened list of visible nodes
-	visibleNodes := tv.Root.Flatten()
+	visibleNodes := tv.getVisibleNodes()
+
+	// Calculate viewport dimensions
+	viewHeight := tv.Height
+	if viewHeight < 1 {
+		viewHeight = 1
+	}
+
+	// Calculate search bar height (only in search mode)
+	searchBarHeight := tv.getSearchBarHeight()
+
+	// Available height for tree content
+	treeViewHeight := viewHeight - searchBarHeight
 
 	if len(visibleNodes) == 0 {
+		// Show "No matches found" if we're in search/filter mode
+		if tv.SearchState == SearchInputting || tv.SearchState == SearchFilterActive {
+			var lines []string
+
+			// Add no matches message
+			lines = append(lines, tv.noMatchesState())
+
+			// Fill space before search bar
+			for len(lines) < treeViewHeight {
+				lines = append(lines, "")
+			}
+
+			// Add search bar at bottom
+			lines = append(lines, tv.renderSearchBar()...)
+
+			return strings.Join(lines, "\n")
+		}
 		return tv.emptyState()
 	}
 
@@ -101,19 +218,13 @@ func (tv *TreeView) View() string {
 		tv.CursorIndex = len(visibleNodes) - 1
 	}
 
-	// Calculate viewport dimensions
-	viewHeight := tv.Height
-	if viewHeight < 1 {
-		viewHeight = 1
-	}
-
-	// Check if we need scroll indicators (content exceeds viewHeight)
-	needsScrollIndicator := len(visibleNodes) > viewHeight
+	// Check if we need scroll indicators (content exceeds treeViewHeight)
+	nodeViewHeight := treeViewHeight
+	needsScrollIndicator := len(visibleNodes) > nodeViewHeight
 
 	// Reserve one line for scroll indicator if needed
-	nodeViewHeight := viewHeight
-	if needsScrollIndicator && viewHeight > 1 {
-		nodeViewHeight = viewHeight - 1
+	if needsScrollIndicator && nodeViewHeight > 1 {
+		nodeViewHeight = nodeViewHeight - 1
 	}
 
 	// Auto-scroll to keep cursor visible (use nodeViewHeight for proper scrolling)
@@ -145,9 +256,14 @@ func (tv *TreeView) View() string {
 		lines = append(lines, indicatorLine)
 	}
 
-	// Fill remaining space if needed (in case we have fewer nodes than viewHeight)
-	for len(lines) < viewHeight {
+	// Fill remaining space before search bar
+	for len(lines) < treeViewHeight {
 		lines = append(lines, "")
+	}
+
+	// Add search bar at bottom (in search mode)
+	if searchBarHeight > 0 {
+		lines = append(lines, tv.renderSearchBar()...)
 	}
 
 	return strings.Join(lines, "\n")
@@ -155,11 +271,48 @@ func (tv *TreeView) View() string {
 
 // Update handles keyboard input for tree navigation
 func (tv *TreeView) Update(msg tea.KeyMsg) (*TreeView, tea.Cmd) {
+	// Handle search input mode first
+	if tv.SearchState == SearchInputting {
+		return tv.handleSearchInput(msg)
+	}
+
+	// Handle filter active mode (after Enter confirmed search)
+	if tv.SearchState == SearchFilterActive {
+		switch msg.String() {
+		case "esc":
+			// Esc clears filter and returns to normal
+			tv.SearchState = SearchOff
+			tv.SearchQuery = ""
+			tv.FilteredNodes = nil
+			tv.MatchPositions = nil
+			tv.CursorIndex = 0
+			tv.ScrollOffset = 0
+			return tv, nil
+		case "/":
+			// "/" starts new search
+			tv.SearchState = SearchInputting
+			tv.SearchQuery = ""
+			tv.FilteredNodes = nil
+			tv.MatchPositions = nil
+			return tv, nil
+		}
+		// Fall through to normal navigation on filtered list
+	}
+
+	// Normal mode: "/" activates search
+	if msg.String() == "/" {
+		tv.SearchState = SearchInputting
+		tv.SearchQuery = ""
+		tv.FilteredNodes = nil
+		tv.MatchPositions = nil
+		return tv, nil
+	}
+
 	if tv.Root == nil {
 		return tv, nil
 	}
 
-	visibleNodes := tv.Root.Flatten()
+	visibleNodes := tv.getVisibleNodes()
 	if len(visibleNodes) == 0 {
 		return tv, nil
 	}
@@ -248,26 +401,33 @@ func (tv *TreeView) renderNode(node *models.TreeNode, selected bool) string {
 	}
 
 	// Calculate indentation based on depth
-	// Root is depth 0, but we don't render root, so subtract 1
-	depth := node.GetDepth() - 1
-	if depth < 0 {
-		depth = 0
+	// In filter mode, show flat list without indentation
+	var indent string
+	if tv.SearchState == SearchOff || tv.FilteredNodes == nil {
+		depth := node.GetDepth() - 1
+		if depth < 0 {
+			depth = 0
+		}
+		indent = strings.Repeat("  ", depth)
 	}
-	indent := strings.Repeat("  ", depth)
 
 	// Choose icon based on node state
 	icon := tv.getNodeIcon(node)
 
-	// Build label with metadata
-	label := tv.buildNodeLabel(node)
+	// Build label with match highlighting if in search mode
+	label := tv.buildNodeLabelWithHighlight(node, selected)
 
 	// Combine parts
 	content := fmt.Sprintf("%s%s %s", indent, icon, label)
 
 	// Truncate if too long
 	maxWidth := tv.Width - 2 // Account for padding
-	if len(content) > maxWidth {
-		content = content[:maxWidth-1] + "…"
+	if lipgloss.Width(content) > maxWidth {
+		// Simple truncation - may cut mid-escape sequence, but lipgloss handles it
+		runes := []rune(content)
+		if len(runes) > maxWidth-1 {
+			content = string(runes[:maxWidth-1]) + "…"
+		}
 	}
 
 	// Apply styling
@@ -496,6 +656,98 @@ func (tv *TreeView) buildNodeLabel(node *models.TreeNode) string {
 	return label
 }
 
+// buildNodeLabelWithHighlight builds the display label with match highlighting and schema path
+func (tv *TreeView) buildNodeLabelWithHighlight(node *models.TreeNode, selected bool) string {
+	metaStyle := lipgloss.NewStyle().Foreground(tv.Theme.Metadata)
+	highlightStyle := lipgloss.NewStyle().Foreground(tv.Theme.Warning).Bold(true)
+
+	// Get base label with highlighting
+	var labelPart string
+
+	// Check if we have match positions for this node (search mode)
+	positions, hasPositions := tv.MatchPositions[node]
+	if hasPositions && len(positions) > 0 && !selected {
+		// Render label with highlighted match positions
+		labelPart = tv.renderHighlightedText(node.Label, positions, highlightStyle)
+	} else {
+		labelPart = node.Label
+	}
+
+	// Build suffix parts (schema path in filter mode, or metadata in normal mode)
+	var suffix string
+
+	if tv.FilteredNodes != nil && len(tv.FilteredNodes) > 0 {
+		// In filter mode: add schema path for context
+		schemaName := tv.getNodeSchemaName(node)
+		if schemaName != "" {
+			suffix = " " + metaStyle.Render("("+schemaName+")")
+		}
+	} else {
+		// Normal mode: add metadata based on node type
+		switch node.Type {
+		case models.TreeNodeTypeSchema:
+			if node.Loaded && len(node.Children) == 0 {
+				suffix = " " + metaStyle.Render("∅")
+			}
+		case models.TreeNodeTypeTable:
+			if meta, ok := node.Metadata.(map[string]interface{}); ok {
+				if rowCount, ok := meta["row_count"].(int64); ok {
+					suffix = " " + metaStyle.Render(formatNumber(rowCount))
+				}
+			}
+		case models.TreeNodeTypeColumn:
+			if meta, ok := node.Metadata.(models.ColumnInfo); ok {
+				if meta.PrimaryKey {
+					pkStyle := lipgloss.NewStyle().Foreground(tv.Theme.PrimaryKey)
+					suffix = " " + pkStyle.Render("⚿")
+				}
+			}
+		}
+	}
+
+	return labelPart + suffix
+}
+
+// renderHighlightedText renders text with specific positions highlighted
+func (tv *TreeView) renderHighlightedText(text string, positions []int, highlightStyle lipgloss.Style) string {
+	if len(positions) == 0 {
+		return text
+	}
+
+	// Create a set of positions to highlight
+	posSet := make(map[int]bool)
+	for _, p := range positions {
+		posSet[p] = true
+	}
+
+	// Build the highlighted string
+	var result strings.Builder
+	runes := []rune(text)
+
+	for i, r := range runes {
+		if posSet[i] {
+			result.WriteString(highlightStyle.Render(string(r)))
+		} else {
+			result.WriteRune(r)
+		}
+	}
+
+	return result.String()
+}
+
+// getNodeSchemaName returns the schema name for a node (for display in filter results)
+func (tv *TreeView) getNodeSchemaName(node *models.TreeNode) string {
+	// Walk up the tree to find the schema node
+	current := node.Parent
+	for current != nil {
+		if current.Type == models.TreeNodeTypeSchema {
+			return current.Label
+		}
+		current = current.Parent
+	}
+	return ""
+}
+
 // adjustScrollOffset adjusts the scroll offset to keep the cursor visible
 func (tv *TreeView) adjustScrollOffset(totalNodes, viewHeight int) {
 	// Ensure cursor is visible in viewport
@@ -553,6 +805,17 @@ func (tv *TreeView) emptyState() string {
 	return style.Render("No databases connected")
 }
 
+// noMatchesState returns the no matches view
+func (tv *TreeView) noMatchesState() string {
+	style := lipgloss.NewStyle().
+		Foreground(tv.Theme.Comment).
+		Italic(true).
+		Width(tv.Width - 2).
+		Align(lipgloss.Center)
+
+	return style.Render("No matches found")
+}
+
 // findNodeIndex finds the index of a node in the flattened list
 func (tv *TreeView) findNodeIndex(nodes []*models.TreeNode, target *models.TreeNode) int {
 	for i, node := range nodes {
@@ -588,7 +851,7 @@ func (tv *TreeView) GetCurrentNode() *models.TreeNode {
 		return nil
 	}
 
-	visibleNodes := tv.Root.Flatten()
+	visibleNodes := tv.getVisibleNodes()
 	if tv.CursorIndex < 0 || tv.CursorIndex >= len(visibleNodes) {
 		return nil
 	}
@@ -653,7 +916,7 @@ func (tv *TreeView) ScrollUp(n int) {
 		return
 	}
 
-	visibleNodes := tv.Root.Flatten()
+	visibleNodes := tv.getVisibleNodes()
 	if len(visibleNodes) == 0 {
 		return
 	}
@@ -686,7 +949,7 @@ func (tv *TreeView) ScrollDown(n int) {
 		return
 	}
 
-	visibleNodes := tv.Root.Flatten()
+	visibleNodes := tv.getVisibleNodes()
 	if len(visibleNodes) == 0 {
 		return
 	}
@@ -724,7 +987,7 @@ func (tv *TreeView) HandleClick(clickedRow int) (*TreeView, tea.Cmd) {
 		return tv, nil
 	}
 
-	visibleNodes := tv.Root.Flatten()
+	visibleNodes := tv.getVisibleNodes()
 	if len(visibleNodes) == 0 {
 		return tv, nil
 	}
@@ -763,4 +1026,228 @@ func (tv *TreeView) HandleClick(clickedRow int) (*TreeView, tea.Cmd) {
 
 	// First click just selects the node (no action)
 	return tv, nil
+}
+
+// IsSearchInputting returns true if the TreeView is in search input mode
+// Used by app to route all keys to TreeView during search
+func (tv *TreeView) IsSearchInputting() bool {
+	return tv.SearchState == SearchInputting
+}
+
+// IsSearchActive returns true if search/filter is active (inputting or filter applied)
+func (tv *TreeView) IsSearchActive() bool {
+	return tv.SearchState == SearchInputting || tv.SearchState == SearchFilterActive
+}
+
+// GetSearchStatus returns the search status string for display in panel title
+// Returns empty string if search is not active
+// Format (lazygit style):
+//   - SearchInputting: "Search: query" (with block cursor shown separately)
+//   - SearchFilterActive: "/query (N)" where N is match count
+func (tv *TreeView) GetSearchStatus() string {
+	switch tv.SearchState {
+	case SearchInputting:
+		return fmt.Sprintf("Search: %s", tv.SearchQuery)
+	case SearchFilterActive:
+		count := len(tv.FilteredNodes)
+		return fmt.Sprintf("/%s (%d)", tv.SearchQuery, count)
+	}
+	return ""
+}
+
+// getSearchBarHeight returns the height of the search bar area
+// Returns 0 when search is not active
+func (tv *TreeView) getSearchBarHeight() int {
+	switch tv.SearchState {
+	case SearchInputting, SearchFilterActive:
+		return 4 // border(1) + search input + hints + border(1)
+	default:
+		return 0
+	}
+}
+
+// renderSearchBar renders the bottom search bar with type tag and hints
+func (tv *TreeView) renderSearchBar() []string {
+	if tv.SearchState == SearchOff {
+		return nil
+	}
+
+	maxWidth := tv.Width - 2
+	var lines []string
+
+	// Build search box content
+	searchLine := tv.renderSearchInputLine(maxWidth - 4) // -4 for border padding
+
+	// Hints line
+	var hintsLine string
+	if tv.SearchState == SearchInputting {
+		hintsLine = tv.renderSyntaxHints(maxWidth - 4)
+	} else {
+		// In filter active mode, show navigation hints
+		hintsLine = tv.renderFilterActiveHints(maxWidth - 4)
+	}
+
+	// Create bordered box with both lines
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(tv.Theme.BorderFocused).
+		Width(maxWidth)
+
+	boxContent := searchLine + "\n" + hintsLine
+	lines = append(lines, boxStyle.Render(boxContent))
+
+	return lines
+}
+
+// renderSearchInputLine renders the search input with type tag
+func (tv *TreeView) renderSearchInputLine(maxWidth int) string {
+	// Parse the current query to extract type and pattern
+	query := ParseSearchQuery(tv.SearchQuery)
+
+	// Build the search line components
+	var parts []string
+
+	// Search icon and prompt
+	iconStyle := lipgloss.NewStyle().Foreground(tv.Theme.Info)
+	promptStyle := lipgloss.NewStyle().Foreground(tv.Theme.Comment)
+	parts = append(parts, iconStyle.Render("🔍")+promptStyle.Render(" >"))
+
+	// Type tag (if present)
+	if query.TypeFilter != "" {
+		tagContent := tv.buildTypeTag(query.TypeFilter, query.Negate)
+		parts = append(parts, tagContent)
+	} else if query.Negate && query.Pattern != "" {
+		// Negation without type filter
+		negateStyle := lipgloss.NewStyle().
+			Foreground(tv.Theme.Error).
+			Bold(true)
+		parts = append(parts, negateStyle.Render("!"))
+	}
+
+	// Search pattern with cursor
+	patternStyle := lipgloss.NewStyle().Foreground(tv.Theme.Foreground)
+	pattern := query.Pattern
+	if tv.SearchState == SearchInputting {
+		// Show cursor
+		cursorStyle := lipgloss.NewStyle().
+			Foreground(tv.Theme.Cursor).
+			Bold(true)
+		pattern += cursorStyle.Render("█")
+	}
+	parts = append(parts, patternStyle.Render(pattern))
+
+	// Match count / position
+	countStyle := lipgloss.NewStyle().Foreground(tv.Theme.Metadata)
+	if len(tv.FilteredNodes) > 0 {
+		// Show position (1-indexed) / total
+		pos := tv.CursorIndex + 1
+		total := len(tv.FilteredNodes)
+		parts = append(parts, countStyle.Render(fmt.Sprintf("(%d/%d)", pos, total)))
+	} else if tv.SearchQuery != "" {
+		parts = append(parts, countStyle.Render("(0)"))
+	}
+
+	// Join parts with space
+	content := strings.Join(parts, " ")
+
+	// Ensure fixed width
+	style := lipgloss.NewStyle().Width(maxWidth)
+	return style.Render(content)
+}
+
+// buildTypeTag builds a styled type tag like [▦ Table] or [! ▦ Table]
+func (tv *TreeView) buildTypeTag(typeFilter string, negate bool) string {
+	// Get icon and label for the type
+	icon, label := tv.getTypeIconAndLabel(typeFilter)
+
+	// Build tag content
+	var tagContent string
+	if negate {
+		negateStyle := lipgloss.NewStyle().Foreground(tv.Theme.Error).Bold(true)
+		tagContent = negateStyle.Render("!") + " " + icon + " " + label
+	} else {
+		tagContent = icon + " " + label
+	}
+
+	// Tag style with background
+	tagStyle := lipgloss.NewStyle().
+		Background(tv.Theme.Selection).
+		Foreground(tv.Theme.Foreground).
+		Padding(0, 1)
+
+	return tagStyle.Render(tagContent)
+}
+
+// getTypeIconAndLabel returns the icon and label for a type filter
+func (tv *TreeView) getTypeIconAndLabel(typeFilter string) (icon string, label string) {
+	iconStyle := func(color lipgloss.Color) lipgloss.Style {
+		return lipgloss.NewStyle().Foreground(color)
+	}
+
+	switch typeFilter {
+	case "table":
+		return iconStyle(tv.Theme.TableIcon).Render("▦"), "Table"
+	case "view":
+		return iconStyle(tv.Theme.ViewIcon).Render("◎"), "View"
+	case "function":
+		return iconStyle(tv.Theme.FunctionIcon).Render("ƒ"), "Func"
+	case "schema":
+		return iconStyle(tv.Theme.SchemaExpanded).Render("▾"), "Schema"
+	case "sequence":
+		return iconStyle(tv.Theme.SequenceIcon).Render("#"), "Seq"
+	case "extension":
+		return iconStyle(tv.Theme.ExtensionIcon).Render("◈"), "Ext"
+	case "column":
+		return iconStyle(tv.Theme.ColumnIcon).Render("•"), "Col"
+	case "index":
+		return iconStyle(tv.Theme.IndexIcon).Render("⊕"), "Idx"
+	default:
+		return "", typeFilter
+	}
+}
+
+// renderSyntaxHints renders the syntax hints line (during input mode)
+func (tv *TreeView) renderSyntaxHints(maxWidth int) string {
+	// Use explicit gray color for hints (Overlay0 from catppuccin)
+	hintColor := lipgloss.Color("#6c7086")
+	dimStyle := lipgloss.NewStyle().Foreground(hintColor).Italic(true)
+	sepStyle := lipgloss.NewStyle().Foreground(hintColor)
+
+	// Format: "t: table │ v: view │ f: func │ !: not │ Esc: exit"
+	// Apply style to each item individually to avoid rendering issues
+	hints := []string{
+		dimStyle.Render("t: table"),
+		dimStyle.Render("v: view"),
+		dimStyle.Render("f: func"),
+		dimStyle.Render("!: not"),
+		dimStyle.Render("Esc: exit"),
+	}
+
+	content := strings.Join(hints, sepStyle.Render(" │ "))
+
+	// Ensure fixed width
+	style := lipgloss.NewStyle().Width(maxWidth)
+	return style.Render(content)
+}
+
+// renderFilterActiveHints renders hints when filter is active (after Enter)
+func (tv *TreeView) renderFilterActiveHints(maxWidth int) string {
+	// Use explicit gray color for hints (Overlay0 from catppuccin)
+	hintColor := lipgloss.Color("#6c7086")
+	dimStyle := lipgloss.NewStyle().Foreground(hintColor).Italic(true)
+	sepStyle := lipgloss.NewStyle().Foreground(hintColor)
+
+	// Format: "j/k: navigate │ Enter: select │ /: search │ Esc: clear"
+	// Apply style to each item individually to avoid rendering issues
+	hints := []string{
+		dimStyle.Render("j/k: navigate"),
+		dimStyle.Render("Enter: select"),
+		dimStyle.Render("/: search"),
+		dimStyle.Render("Esc: clear"),
+	}
+
+	content := strings.Join(hints, sepStyle.Render(" │ "))
+
+	style := lipgloss.NewStyle().Width(maxWidth)
+	return style.Render(content)
 }

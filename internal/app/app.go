@@ -798,6 +798,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.handleSearchInput(msg)
 		}
 
+		// Handle TreeView search mode - route keys to TreeView
+		// This must come before global key handlers to capture typing during search
+		// and to allow Esc to clear filter in SearchFilterActive mode
+		if a.treeView != nil && a.state.FocusArea == models.FocusTreeView {
+			// In SearchInputting mode, route ALL keys to TreeView
+			if a.treeView.IsSearchInputting() {
+				var cmd tea.Cmd
+				a.treeView, cmd = a.treeView.Update(msg)
+				return a, cmd
+			}
+			// In SearchFilterActive mode, route Esc and / to TreeView
+			if a.treeView.IsSearchActive() && (msg.String() == "esc" || msg.String() == "/") {
+				var cmd tea.Cmd
+				a.treeView, cmd = a.treeView.Update(msg)
+				return a, cmd
+			}
+		}
+
 		// Handle code editor input if visible and DataPanel is focused
 		if a.showCodeEditor && a.codeEditor != nil && a.state.FocusArea == models.FocusDataPanel {
 			// Tab is handled in the unified Tab case below, skip here
@@ -1671,7 +1689,9 @@ func (a *App) renderNormalView() string {
 			styles.separatorStyle.Render(" │ ") +
 			styles.keyStyle.Render("→←") + styles.dimStyle.Render(" expand") +
 			styles.separatorStyle.Render(" │ ") +
-			styles.keyStyle.Render("Enter") + styles.dimStyle.Render(" select")
+			styles.keyStyle.Render("Enter") + styles.dimStyle.Render(" select") +
+			styles.separatorStyle.Render(" │ ") +
+			styles.keyStyle.Render("/") + styles.dimStyle.Render(" search")
 	} else {
 		// Data panel - include SQL editor shortcut
 		focusLabel := focusLabelStyle.Render("Data")
@@ -1735,6 +1755,7 @@ func (a *App) renderNormalView() string {
 	a.treeView.Width = a.leftPanel.Width - 2 // -2 for horizontal padding inside panel
 	a.treeView.Height = treeContentHeight
 	a.leftPanel.Content = a.treeView.View()
+	a.leftPanel.Title = "Explorer"
 
 	// Update right panel content
 	// Calculate available content height: panel height - borders (2) - padding (0)
