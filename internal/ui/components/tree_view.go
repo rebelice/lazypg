@@ -605,57 +605,6 @@ func (tv *TreeView) getNodeIcon(node *models.TreeNode) string {
 	return lipgloss.NewStyle().Foreground(iconColor).Render(icon)
 }
 
-// buildNodeLabel builds the display label for a node, including metadata
-func (tv *TreeView) buildNodeLabel(node *models.TreeNode) string {
-	label := node.Label
-	metaStyle := lipgloss.NewStyle().Foreground(tv.Theme.Metadata)
-
-	// Add metadata based on node type
-	switch node.Type {
-	case models.TreeNodeTypeDatabase:
-		// Active database already shown with icon color, no need for extra text
-		// Just show the database name
-
-	case models.TreeNodeTypeSchema:
-		// Label already includes count info from loadTree, show empty marker if no children
-		if node.Loaded && len(node.Children) == 0 {
-			label += " " + metaStyle.Render("∅")
-		}
-
-	case models.TreeNodeTypeTableGroup, models.TreeNodeTypeViewGroup:
-		// Label already includes count from loadTree
-
-	case models.TreeNodeTypeTable:
-		// Add row count if available with better formatting
-		if meta, ok := node.Metadata.(map[string]interface{}); ok {
-			if rowCount, ok := meta["row_count"].(int64); ok {
-				label += " " + metaStyle.Render(formatNumber(rowCount))
-			}
-		}
-
-	case models.TreeNodeTypeColumn:
-		// Column label already includes type from BuildColumnNodes
-		// Add indicators for constraints
-		if meta, ok := node.Metadata.(models.ColumnInfo); ok {
-			var indicators []string
-
-			if meta.PrimaryKey {
-				pkStyle := lipgloss.NewStyle().Foreground(tv.Theme.PrimaryKey)
-				indicators = append(indicators, pkStyle.Render("⚿"))
-			}
-
-			// Note: ForeignKey and NotNull fields don't exist in ColumnInfo yet
-			// They can be added in future enhancement
-
-			if len(indicators) > 0 {
-				label += " " + strings.Join(indicators, " ")
-			}
-		}
-	}
-
-	return label
-}
-
 // buildNodeLabelWithHighlight builds the display label with match highlighting and schema path
 func (tv *TreeView) buildNodeLabelWithHighlight(node *models.TreeNode, selected bool) string {
 	metaStyle := lipgloss.NewStyle().Foreground(tv.Theme.Metadata)
@@ -676,7 +625,7 @@ func (tv *TreeView) buildNodeLabelWithHighlight(node *models.TreeNode, selected 
 	// Build suffix parts (schema path in filter mode, or metadata in normal mode)
 	var suffix string
 
-	if tv.FilteredNodes != nil && len(tv.FilteredNodes) > 0 {
+	if len(tv.FilteredNodes) > 0 {
 		// In filter mode: add schema path for context
 		schemaName := tv.getNodeSchemaName(node)
 		if schemaName != "" {
