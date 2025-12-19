@@ -1,6 +1,7 @@
 package connection_history
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"runtime"
@@ -123,7 +124,7 @@ func (ps *PasswordStore) Get(host string, port int, database, user string) (stri
 	key := makeKey(host, port, database, user)
 	item, err := ps.ring.Get(key)
 	if err != nil {
-		if err == keyring.ErrKeyNotFound {
+		if errors.Is(err, keyring.ErrKeyNotFound) {
 			return "", ErrPasswordNotFound
 		}
 		return "", &PasswordReadError{Err: err}
@@ -135,7 +136,7 @@ func (ps *PasswordStore) Get(host string, port int, database, user string) (stri
 func (ps *PasswordStore) Delete(host string, port int, database, user string) error {
 	key := makeKey(host, port, database, user)
 	err := ps.ring.Remove(key)
-	if err != nil && err != keyring.ErrKeyNotFound {
+	if err != nil && !errors.Is(err, keyring.ErrKeyNotFound) {
 		return fmt.Errorf("failed to delete password from keyring: %w", err)
 	}
 	return nil

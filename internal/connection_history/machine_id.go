@@ -3,6 +3,7 @@ package connection_history
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
@@ -24,6 +25,10 @@ func deriveFilePassword() (string, error) {
 	username := os.Getenv("USER")
 	if username == "" {
 		username = os.Getenv("USERNAME") // Windows
+	}
+	if username == "" {
+		// Fallback for containers/service accounts without USER env
+		username = fmt.Sprintf("uid-%d", os.Getuid())
 	}
 
 	// Combine machine ID, username, and salt to create a unique password
